@@ -8,7 +8,7 @@ export function getOpenAIModelLabel(modelId) {
     return OPENAI_MODELS.find((model) => model.id === modelId)?.name || modelId;
 }
 
-export async function fetchOpenAICompletion({ prompt, additionalInstructions, apiKey, targetChars, model }) {
+export async function fetchOpenAICompletion({ prompt, additionalInstructions, apiKey, targetChars, model, outputType = "record" }) {
     if (!apiKey?.trim()) {
         throw new Error("OpenAI API key가 적용되지 않았습니다.");
     }
@@ -24,6 +24,7 @@ export async function fetchOpenAICompletion({ prompt, additionalInstructions, ap
             apiKey: apiKey.trim(),
             targetChars,
             model: model || DEFAULT_OPENAI_MODEL,
+            outputType,
         }),
     });
 

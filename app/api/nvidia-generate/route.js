@@ -1,5 +1,5 @@
 import { getMaxTokensForTargetChars } from "../../../utils/textProcessor.js";
-import { AVAILABLE_MODELS, getNvidiaModelId, isNvidiaModel } from "../../../utils/streamFetch.js";
+import { AVAILABLE_MODELS, getLetterSystemMessage, getNvidiaModelId, isNvidiaModel } from "../../../utils/streamFetch.js";
 
 const DEFAULT_NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 const DEFAULT_NVIDIA_MODEL = "google/gemma-4-31b-it";
@@ -14,9 +14,13 @@ const KEYWORD_EXPANSION_GUIDE = `
 - 최종 출력은 사용자가 바로 붙여 넣을 수 있는 본문 한 문단만 작성한다.
 `;
 
-function buildSystemMessage(additionalInstructions) {
-    let systemMessage = "선생님을 돕는 전문가로서 학생들의 학교생활기록부와 가정통신문 작성을 도와줍니다.";
-    systemMessage += KEYWORD_EXPANSION_GUIDE;
+function buildSystemMessage(additionalInstructions, outputType = "record") {
+    let systemMessage = outputType === "letter"
+        ? getLetterSystemMessage()
+        : "선생님을 돕는 전문가로서 학생들의 학교생활기록부와 가정통신문 작성을 도와줍니다.";
+    if (outputType !== "letter") {
+        systemMessage += KEYWORD_EXPANSION_GUIDE;
+    }
     if (additionalInstructions) {
         systemMessage += `\n\n사용자 추가 규칙 (최우선 준수):\n${additionalInstructions}`;
     }
@@ -63,7 +67,7 @@ function isRetryableStatus(status) {
     return status === 429 || status === 502 || status === 503 || status === 504;
 }
 
-async function callNvidia({ usedModel, prompt, additionalInstructions, targetChars, signal }) {
+async function callNvidia({ usedModel, prompt, additionalInstructions, targetChars, outputType, signal }) {
     const maxTokens = getMaxTokensForTargetChars(targetChars);
     const response = await fetch(process.env.NVIDIA_API_URL || DEFAULT_NVIDIA_API_URL, {
         method: "POST",
@@ -75,7 +79,7 @@ async function callNvidia({ usedModel, prompt, additionalInstructions, targetCha
         body: JSON.stringify({
             model: usedModel,
             messages: [
-                { role: "system", content: buildSystemMessage(additionalInstructions) },
+                { role: "system", content: buildSystemMessage(additionalInstructions, outputType) },
                 { role: "user", content: buildUserMessage(prompt, additionalInstructions) },
             ],
             max_tokens: maxTokens,
@@ -130,7 +134,7 @@ async function callNvidiaWithRetry(args) {
 export async function POST(req) {
     try {
         const body = await req.json();
-        const { prompt, additionalInstructions, targetChars, model } = body;
+        const { prompt, additionalInstructions, targetChars, model, outputType = "record" } = body;
 
         if (!process.env.NVIDIA_API_KEY?.trim()) {
             return Response.json({ error: "NVIDIA_API_KEY 환경 변수가 필요합니다." }, { status: 400 });
@@ -145,6 +149,7 @@ export async function POST(req) {
             prompt,
             additionalInstructions,
             targetChars,
+            outputType,
         });
 
         if (!response.ok) {

@@ -1,5 +1,5 @@
 const PROVIDER_LABELS = {
-    local: "로컬 LLM",
+    local: "로컬 LLM(lm.alluser.site)",
     nvidia: "NVIDIA Cloud 모델",
     openai: "OpenAI API",
 };

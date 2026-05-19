@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { fetchOpenAICompletion } from "../utils/openAIFetch.js";
-import { AVAILABLE_MODELS, fetchStream, getMaxTokensForLocalModel, getModelOptionLabel } from "../utils/streamFetch.js";
+import { AVAILABLE_MODELS, fetchStream, getLocalModelConfig, getMaxTokensForLocalModel, getModelOptionLabel } from "../utils/streamFetch.js";
 import { POST } from "../app/api/openai-generate/route.js";
 
 test("fetchStream sandwiches additional instructions into system and user messages", async () => {
@@ -200,7 +200,7 @@ test("fetchStream retry prompt uses polite endings for letter output", async () 
     }
 
     assert.equal(calls.length, 2);
-    assert.match(calls[1].messages[1].content, /'~습니다\.', '~합니다\.', '~바랍니다\.'/);
+    assert.match(calls[1].messages[1].content, /과거 경어체/);
     assert.doesNotMatch(calls[1].messages[1].content, /'~함\.', '~음\.', '~임\.'/);
 });
 
@@ -266,6 +266,12 @@ test("large local 26B models get expanded max token budget", () => {
     assert.equal(getMaxTokensForLocalModel("gemma4:e2b", 589), 2003);
     assert.equal(getMaxTokensForLocalModel("gemma4:e4b", 589), 3072);
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-26b-a4b-it-q4ks", 589), 4096);
+});
+
+test("unknown local model fallback also uses lm.alluser.site", () => {
+    const config = getLocalModelConfig("unknown-model");
+
+    assert.equal(config.apiUrl, "https://lm.alluser.site");
 });
 
 test("fetchOpenAICompletion sends additional instructions to the OpenAI route", async () => {

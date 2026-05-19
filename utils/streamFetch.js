@@ -1,7 +1,5 @@
 import { getMaxTokensForTargetChars } from "./textProcessor.js";
 
-const OLLAMA_API_URL = "https://api.alluser.site";
-const OLLAMA_API_KEY = "gudgns0411skaluv2018tjdbs130429";
 const LMSTUDIO_API_URL = "https://lm.alluser.site";
 const LMSTUDIO_API_KEY = "gudgns0411skaluv2018tjdbs130429";
 const LMSTUDIO_GEMMA_E4B_MODEL = "google/gemma-4-e4b";
@@ -36,10 +34,23 @@ export function getNvidiaModelId(modelId) {
 export function getLocalModelConfig(modelId) {
     const selected = AVAILABLE_MODELS.find((model) => model.id === modelId);
     return {
-        apiUrl: selected?.apiUrl || OLLAMA_API_URL,
-        apiKey: selected?.apiKey || OLLAMA_API_KEY,
+        apiUrl: selected?.apiUrl || LMSTUDIO_API_URL,
+        apiKey: selected?.apiKey || LMSTUDIO_API_KEY,
         apiModel: selected?.apiModel || modelId || DEFAULT_LOCAL_MODEL,
     };
+}
+
+export function getLocalLLMRequestHeaders(modelConfig) {
+    const origin = modelConfig.apiUrl || LMSTUDIO_API_URL;
+    const headers = {
+        "Content-Type": "application/json",
+        Origin: origin,
+        Referer: `${origin}/`,
+    };
+    if (modelConfig.apiKey) {
+        headers["X-API-Key"] = modelConfig.apiKey;
+    }
+    return headers;
 }
 
 /**
@@ -82,12 +93,12 @@ async function callOllamaAPI(systemMessage, userPrompt, model, targetChars) {
     const temperature = isLightweight ? 0.8 : 0.7;
     const maxTokens = getMaxTokensForLocalModel(localModel, targetChars);
 
-    const res = await fetch(`${modelConfig.apiUrl}/v1/chat/completions`, {
+    const apiUrl = `${modelConfig.apiUrl}/v1/chat/completions`;
+    console.info(`[Local LLM] POST ${apiUrl} model=${modelConfig.apiModel}`);
+
+    const res = await fetch(apiUrl, {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "X-API-Key": modelConfig.apiKey,
-        },
+        headers: getLocalLLMRequestHeaders(modelConfig),
         body: JSON.stringify({
             model: modelConfig.apiModel,
             messages: [
@@ -162,17 +173,25 @@ function getStandardSystemMessage() {
 9. 오직 본문 텍스트만 출력 (글자수, 분석 등 메타정보 출력하지 않음)`;
 }
 
-function getLetterSystemMessage() {
+export function getLetterSystemMessage() {
     return `학기말 가정통신문 작성 전문가. 반드시 지킬 규칙:
-1. 경어체(~습니다, ~합니다, ~바랍니다)로 자연스럽게 작성
+1. 경어체로 자연스럽게 작성
 2. '학생이', 'OO가', '자녀분이' 등 주어 없이 행동이나 성장 내용부터 서술
 3. 편지 인사말, 제목, 번호, 글자수 설명, 분석 문구를 출력하지 않음
 4. 특정 과목명, 점수, 등수, 기관명, 상호명을 출력하지 않음
 5. 줄바꿈 없이 하나의 문단으로 작성
-6. 입력된 키워드 범위 안에서 긍정적인 성장과 가정 지도 방향을 서술
-7. 마지막 문장은 반드시 완전한 경어체 문장과 마침표로 끝냄
-8. '마지막으로', '끝으로', '마무리하며', '덧붙여', '추가로' 같은 마무리 접속어를 사용하지 않음
-9. 오직 가정통신문 본문 텍스트만 출력`;
+6. 입력된 키워드는 방학 조언 영역으로 사용하고 관찰 사실처럼 꾸며 쓰지 않음
+7. 학교생활을 성실하게 수행했다는 일반적이고 따뜻한 평가에서 시작
+8. 한 학기 또는 한 해 동안 학교생활을 성실하게 수행한 내용은 과거 경어체(~했습니다, ~였습니다, ~보였습니다, ~돋보였습니다)로 작성
+9. 방학 동안 가정에서 지도할 내용은 권유형 경어체(~바랍니다, ~주시기 바랍니다)로 작성
+10. 학업 계획, 건강한 생활 리듬, 친구와의 배려 있는 관계, 가족과의 대화나 지지 중 최소 세 가지 이상을 반드시 반영하되 독립 문장으로 나누지 말고 하나의 흐름으로 연결
+11. 입력되지 않은 구체적인 활동, 실험, 탐구 주제, 수행 장면은 지어내지 않음
+12. 문장 사이에는 "그 과정에서", "이어", "나아가", "이러한 흐름이" 같은 연결 흐름을 자연스럽게 사용하되 반복하지 않음
+13. 추가 정보를 요청하지 말고 입력된 키워드만으로 완성
+14. 같은 시작 표현과 같은 가정 지도 문장을 반복하지 않고 매번 다른 관점으로 작성
+15. 마지막 문장은 반드시 완전한 경어체 문장과 마침표로 끝냄
+16. '마지막으로', '끝으로', '마무리하며', '덧붙여', '추가로' 같은 마무리 접속어를 사용하지 않음
+17. 오직 가정통신문 본문 텍스트만 출력`;
 }
 
 export async function fetchStream(bodyData) {
@@ -208,7 +227,7 @@ export async function fetchStream(bodyData) {
     // 완전한 문장으로 끝나는지 확인 → 아니면 재시도 (최대 2회)
     const MAX_RETRIES = 2;
     const endingInstruction = outputType === "letter"
-        ? "반드시 '~습니다.', '~합니다.', '~바랍니다.' 등 경어체 종결어미와 마침표로 끝내세요."
+        ? "학교생활을 성실하게 수행했다는 일반적인 평가를 '~했습니다.', '~였습니다.', '~돋보였습니다.' 같은 과거 경어체로 쓰고, 입력된 키워드는 방학 조언 영역으로만 자연스럽게 연결하세요. 가정 지도 내용은 '~바랍니다.' 같은 권유형 경어체와 마침표로 끝내세요."
         : "반드시 '~함.', '~음.', '~임.' 등 종결어미와 마침표로 끝내세요.";
 
     for (let retry = 0; retry < MAX_RETRIES; retry++) {

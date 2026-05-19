@@ -52,9 +52,9 @@ test("runGenerationWithProgress shows local LLM connection and generation stages
     });
 
     assert.deepEqual(messages, [
-        "로컬 LLM 접속 중...",
-        "로컬 LLM 접속 완료, 생성 요청 중...",
-        "로컬 LLM 생성 중...",
+        "로컬 LLM(lm.alluser.site) 접속 중...",
+        "로컬 LLM(lm.alluser.site) 접속 완료, 생성 요청 중...",
+        "로컬 LLM(lm.alluser.site) 생성 중...",
     ]);
 });
 

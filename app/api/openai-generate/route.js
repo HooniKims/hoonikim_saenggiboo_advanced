@@ -1,10 +1,13 @@
 import { getMaxTokensForTargetChars } from "../../../utils/textProcessor.js";
 import { DEFAULT_OPENAI_MODEL, OPENAI_MODELS } from "../../../utils/openAIFetch.js";
+import { getLetterSystemMessage } from "../../../utils/streamFetch.js";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 
-function buildSystemMessage(additionalInstructions) {
-    let systemMessage = "선생님을 돕는 전문가로서 학생들의 학교생활기록부와 가정통신문 작성을 도와줍니다.";
+function buildSystemMessage(additionalInstructions, outputType = "record") {
+    let systemMessage = outputType === "letter"
+        ? getLetterSystemMessage()
+        : "선생님을 돕는 전문가로서 학생들의 학교생활기록부와 가정통신문 작성을 도와줍니다.";
     if (additionalInstructions) {
         systemMessage += `\n\n【최우선 지침】\n아래 사용자 추가 지침은 기본 작성 규칙보다 우선합니다. 충돌 시 사용자 추가 지침을 우선 적용하세요.\n${additionalInstructions}`;
     }
@@ -44,7 +47,7 @@ function getOpenAIMaxCompletionTokens(targetChars) {
     return Math.max(4096, Math.min(8192, baseTokens * 4));
 }
 
-async function callOpenAI({ apiKey, prompt, additionalInstructions, targetChars, model }) {
+async function callOpenAI({ apiKey, prompt, additionalInstructions, targetChars, model, outputType }) {
     const maxTokens = getOpenAIMaxCompletionTokens(targetChars);
     const response = await fetch(OPENAI_API_URL, {
         method: "POST",
@@ -55,7 +58,7 @@ async function callOpenAI({ apiKey, prompt, additionalInstructions, targetChars,
         body: JSON.stringify({
             model,
             messages: [
-                { role: "system", content: buildSystemMessage(additionalInstructions) },
+                { role: "system", content: buildSystemMessage(additionalInstructions, outputType) },
                 { role: "user", content: buildUserMessage(prompt, additionalInstructions) },
             ],
             max_completion_tokens: maxTokens,
@@ -87,7 +90,7 @@ function getFallbackModel(requestedModel) {
 export async function POST(req) {
     try {
         const body = await req.json();
-        const { prompt, additionalInstructions, apiKey, targetChars, model } = body;
+        const { prompt, additionalInstructions, apiKey, targetChars, model, outputType = "record" } = body;
 
         if (!apiKey?.trim()) {
             return Response.json({ error: "OpenAI API key가 필요합니다." }, { status: 400 });
@@ -106,6 +109,7 @@ export async function POST(req) {
             additionalInstructions,
             targetChars,
             model: requestedModel,
+            outputType,
         });
         let usedModel = requestedModel;
 
@@ -117,6 +121,7 @@ export async function POST(req) {
                 additionalInstructions,
                 targetChars,
                 model: fallbackModel,
+                outputType,
             });
             response = retry.response;
             data = retry.data;
@@ -130,6 +135,7 @@ export async function POST(req) {
                 additionalInstructions,
                 targetChars: Math.ceil((Number(targetChars) || 490) * 1.2),
                 model: usedModel,
+                outputType,
             });
             response = retry.response;
             data = retry.data;

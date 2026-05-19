@@ -1,4 +1,4 @@
-export async function fetchNvidiaCompletion({ prompt, additionalInstructions, targetChars, model }) {
+export async function fetchNvidiaCompletion({ prompt, additionalInstructions, targetChars, model, outputType = "record" }) {
     const response = await fetch("/api/nvidia-generate", {
         method: "POST",
         headers: {
@@ -9,6 +9,7 @@ export async function fetchNvidiaCompletion({ prompt, additionalInstructions, ta
             additionalInstructions,
             targetChars,
             model,
+            outputType,
         }),
     });
 

@@ -12,7 +12,7 @@ import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import { generateWithSilentValidation } from "../../utils/generationHarness";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
-import { buildShuffledKeywordContext } from "../../utils/letterKeywords";
+import { buildLetterRuleTermInstruction, buildLetterVariationInstruction, buildShuffledKeywordContext, getLetterBannedTerms, getLetterRequiredTerms } from "../../utils/letterKeywords";
 
 export default function LetterPage() {
     // State
@@ -187,12 +187,14 @@ export default function LetterPage() {
         const lengthInstruction = getCharacterGuideline(targetChars, targetBytes, getMinimumTargetBytes(targetBytes));
 
         const keywordContext = buildShuffledKeywordContext(keywords);
+        const ruleTermInstruction = buildLetterRuleTermInstruction({ season, keywords });
+        const variationInstruction = buildLetterVariationInstruction();
 
         let promptContent = "";
 
         const periodGoal = season === "summer"
-            ? "한 학기 동안 학교에서 보여준 긍정적인 모습과 노력, 그리고 여름방학 동안 가정에서 지도해야 할 점"
-            : "일년 동안 보여준 성취와 긍정적인 변화, 그리고 겨울방학 및 새 학기 준비를 위해 가정에서 지도해야 할 점";
+            ? "한 학기 동안 학교생활을 성실하게 수행했다는 일반적인 평가와 여름방학 동안 가정에서 살필 조언"
+            : "한 해 동안 학교생활을 성실하게 수행했다는 일반적인 평가와 겨울방학 및 새 학기 준비를 위해 가정에서 살필 조언";
 
         return `당신은 담임 교사입니다. 학기말 통지표에 들어갈 '가정통신문(종합의견)' 본문을 작성하세요.
 
@@ -200,23 +202,37 @@ export default function LetterPage() {
 ${keywordContext}
 
 <작성 규칙>
-1. 작성 내용: 학생이 ${periodGoal}을 객관적이고 따뜻하게 기술할 것
+1. 작성 내용: ${periodGoal}을 객관적이고 따뜻하게 기술할 것
 2. 편지 형식(예: "안녕하세요, 어머님")을 사용하지 않고 바로 본문만 서술
 3. 'OO가', '자녀분이', '학생이' 등 주어를 생략하고 바로 행동부터 서술
-4. 입력된 키워드(학업, 건강, 교우관계 등)를 바탕으로 구체적인 성장을 서술
+4. 입력된 키워드(학업, 건강, 교우관계 등)는 관찰 사실이 아니라 방학 동안 가정에서 살필 조언 영역으로 사용할 것
 5. 특정 과목명(국어, 수학 등)이나 점수/등수는 절대 언급하지 않음
-6. 명사형 종결어미가 아닌, 경어체("~합니다.", "~습니다.", "~바랍니다.")와 마침표(.)로 문장을 완결되게 끝냄
+6. 학교에서 보여준 모습은 과거 경어체("~했습니다.", "~였습니다.", "~돋보였습니다.")로 서술
 7. 줄바꿈 없이 하나의 문단으로 작성
 8. '마지막으로', '끝으로', '마무리하며', '덧붙여', '추가로' 같은 마무리 접속어를 사용하지 않음
+9. 아래 학기 구분 필수 용어는 표현을 바꾸지 말고 본문 안에 정확히 포함할 것
+10. 아래 금지 용어는 본문에 절대 포함하지 않을 것
+11. 키워드는 목록처럼 나열하지 말고 문장 속에서 자연스럽게 풀어 쓸 것
+12. 학교생활을 성실하게 잘 수행했다는 일반적인 뉘앙스로 시작하되 매번 표현을 다르게 할 것
+13. 학업 계획, 건강한 생활 리듬, 친구와의 배려 있는 관계, 가족과의 대화나 지지 중 최소 세 가지 이상을 반드시 반영하되 하나의 흐름으로 연결하고 각각 따로 설명하지 말 것
+14. 입력되지 않은 구체적인 활동, 실험, 탐구 주제, 수행 장면은 지어내지 말 것
+15. 문장 사이에는 "그 과정에서", "이어", "나아가", "이러한 흐름이" 같은 연결 흐름을 자연스럽게 사용할 것
+16. 추가 정보를 요청하지 말고 입력된 키워드만으로 완성할 것
+17. 방학 동안 가정에서 지도할 내용은 권유형 경어체("~바랍니다.", "~주시기 바랍니다.")로 마무리할 것
+
+${ruleTermInstruction}
+
+${variationInstruction}
 
 ${lengthInstruction}
 
 <출력 형식>
 - 오직 가정통신문 본문 텍스트만 출력
 - 글자수 표기, 분석, 검증 포인트, 부가 설명 등 메타 정보는 출력하지 않음
+- "학업, 건강, 친구관계, 가족관계"처럼 키워드를 쉼표로 나열하지 않음
 
 <좋은 예시>
-"학교 생활에 성실하게 임하며 교우 관계가 원만하여 친구들의 의견을 잘 경청하고 배려하는 모습이 돋보입니다. 학업에 대한 열의를 가지고 수업 시간에 적극적으로 참여하며, 스스로 학습 계획을 세워 실천하는 자기주도적 학습 능력이 우수합니다. 방학 동안에는 규칙적인 생활 습관을 유지하고 꾸준한 독서를 통해 깊이 있는 사고력을 기를 수 있도록 가정에서 격려해 주시기 바랍니다."
+"한 학기 동안 학교생활에 성실하게 참여하며 맡은 일을 차분히 해내는 모습이 돋보였습니다. 여름방학 동안에는 배움의 흐름을 이어 갈 수 있도록 무리하지 않는 학습 계획을 세우고, 건강한 생활 리듬을 지키며 가족과의 대화 속에서 마음을 안정적으로 돌보는 시간을 가져 보시기 바랍니다. 친구들과도 서로를 배려하는 관계를 이어 갈 수 있도록 가정에서 함께 살펴봐 주시기 바랍니다."
     `;
     };
 
@@ -237,16 +253,19 @@ ${lengthInstruction}
                 targetChars,
                 mode: "letter",
                 forbiddenTerms: [student.name],
-                maxRepairAttempts: 1,
+                requiredTerms: getLetterRequiredTerms({ season, keywords }),
+                bannedTerms: getLetterBannedTerms(season),
+                requiredAdviceDomains: true,
+                maxRepairAttempts: 2,
                 generateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
                     attempt,
                     previousValidation,
                     provider: getGenerationProvider({ isNvidiaSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
                     setProgress: (message) => updateStudent(student.id, "progress", message),
                     run: () => isNvidiaSelected
-                        ? fetchNvidiaCompletion({ prompt: nextPrompt, targetChars, model: selectedModel })
+                        ? fetchNvidiaCompletion({ prompt: nextPrompt, targetChars, model: selectedModel, outputType: "letter" })
                         : appliedOpenAIKey
-                            ? fetchOpenAICompletion({ prompt: nextPrompt, apiKey: appliedOpenAIKey, targetChars, model: selectedOpenAIModel })
+                            ? fetchOpenAICompletion({ prompt: nextPrompt, apiKey: appliedOpenAIKey, targetChars, model: selectedOpenAIModel, outputType: "letter" })
                             : fetchStream({ prompt: nextPrompt, model: selectedModel, targetChars, outputType: "letter" }),
                 }),
             });

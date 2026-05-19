@@ -1,9 +1,9 @@
-import { DEFAULT_LOCAL_MODEL, getLocalModelConfig, getMaxTokensForLocalModel } from "../../../utils/streamFetch";
+import { DEFAULT_LOCAL_MODEL, getLetterSystemMessage, getLocalLLMRequestHeaders, getLocalModelConfig, getMaxTokensForLocalModel } from "../../../utils/streamFetch.js";
 
 export async function POST(req) {
     try {
         const body = await req.json();
-        const { prompt, additionalInstructions, targetChars } = body;
+        const { prompt, additionalInstructions, targetChars, outputType = "record" } = body;
         const maxTokens = getMaxTokensForLocalModel(DEFAULT_LOCAL_MODEL, targetChars);
         const modelConfig = getLocalModelConfig(DEFAULT_LOCAL_MODEL);
 
@@ -21,7 +21,9 @@ export async function POST(req) {
         }
 
         // 메시지 구성
-        let systemMessage = "선생님을 돕는 전문가로서 학생들의 학교생활기록부 작성을 도와줍니다.";
+        let systemMessage = outputType === "letter"
+            ? getLetterSystemMessage()
+            : "선생님을 돕는 전문가로서 학생들의 학교생활기록부 작성을 도와줍니다.";
         if (additionalInstructions) {
             systemMessage += `\n\n【🚨 최우선 지침】\n${additionalInstructions}`;
         }
@@ -30,12 +32,7 @@ export async function POST(req) {
         const apiUrl = `${localApiUrl}/v1/chat/completions`;
         console.log("[DEBUG] Calling:", apiUrl);
 
-        const headers = {
-            "Content-Type": "application/json",
-        };
-        if (localApiKey) {
-            headers["X-API-Key"] = localApiKey;
-        }
+        const headers = getLocalLLMRequestHeaders(modelConfig);
 
         const apiResponse = await fetch(apiUrl, {
             method: "POST",

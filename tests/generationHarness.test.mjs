@@ -131,7 +131,7 @@ test("validateGeneratedText allows the expanded 1500-byte character guide", () =
 
 test("validateGeneratedText accepts clean letter text", () => {
     const validation = validateGeneratedText(
-        "학교 생활에 성실하게 참여하며 친구들의 의견을 존중하는 태도가 돋보입니다.",
+        "학교 생활에 성실하게 참여하며 친구들의 의견을 존중하는 태도가 돋보였습니다.",
         {
             forbiddenTerms: ["홍길동"],
             mode: "letter",
@@ -176,6 +176,160 @@ test("validateGeneratedText rejects closing transition phrases in records and le
     assert.equal(letterValidation.ok, false);
     assert.ok(recordValidation.issues.some((issue) => issue.code === "summary_closing"));
     assert.ok(letterValidation.issues.some((issue) => issue.code === "summary_closing"));
+});
+
+test("validateGeneratedText rejects letter text that misses required settings or uses blocked terms", () => {
+    const validation = validateGeneratedText(
+        "학교 생활에 성실하게 참여하며 친구들의 의견을 존중하는 태도가 돋보였습니다. 여름방학 동안 건강한 생활 습관을 이어 가기 바랍니다.",
+        {
+            mode: "letter",
+            targetChars: 160,
+            requiredTerms: ["겨울방학", "학업"],
+            bannedTerms: ["여름방학"],
+        },
+    );
+
+    assert.equal(validation.ok, false);
+    assert.ok(validation.issues.some((issue) => issue.code === "missing_required_term" && issue.detail === "겨울방학"));
+    assert.ok(validation.issues.some((issue) => issue.code === "missing_required_term" && issue.detail === "학업"));
+    assert.ok(validation.issues.some((issue) => issue.code === "banned_term" && issue.detail === "여름방학"));
+});
+
+test("validateGeneratedText rejects model help text in letters", () => {
+    const validation = validateGeneratedText(
+        "키워드가 입력되지 않아 내용을 구성하는 데 어려움이 있습니다. 학생의 성장 과정이 담긴 구체적인 활동 내용이나 태도를 알려주시면 완성도 높은 가정통신문을 작성해 드리겠습니다.",
+        {
+            mode: "letter",
+            targetChars: 160,
+        },
+    );
+
+    assert.equal(validation.ok, false);
+    assert.ok(validation.issues.some((issue) => issue.code === "meta_text"));
+});
+
+test("validateGeneratedText can require vacation advice domains in letters", () => {
+    const validation = validateGeneratedText(
+        "성실하게 학교생활에 참여했습니다. 여름방학 동안 학업 계획을 차근차근 실천해 주시기 바랍니다.",
+        {
+            mode: "letter",
+            targetChars: 160,
+            requiredAdviceDomains: true,
+        },
+    );
+
+    assert.equal(validation.ok, false);
+    assert.ok(validation.issues.some((issue) => issue.code === "missing_advice_domain"));
+});
+
+test("generateWithSilentValidation repairs missing vacation advice domains", async () => {
+    const result = await generateWithSilentValidation({
+        prompt: "가정통신문을 작성하세요.",
+        maxTargetBytes: 1000,
+        minTargetBytes: 0,
+        targetChars: 490,
+        mode: "letter",
+        requiredAdviceDomains: true,
+        maxRepairAttempts: 0,
+        generateOnce: async () => "성실하게 학교생활에 참여했습니다. 여름방학 동안 학업 계획을 차근차근 실천해 주시기 바랍니다.",
+    });
+
+    assert.equal(result.validation.ok, true);
+    assert.match(result.text, /학업|학습|배움|공부|계획/);
+    assert.match(result.text, /건강|생활\s*리듬|휴식|몸과\s*마음/);
+    assert.match(result.text, /친구|관계|배려|존중|경청|협력/);
+    assert.match(result.text, /가족|가정|대화|지지|격려|관심/);
+});
+
+test("generateWithSilentValidation deterministically repairs missing letter setting terms", async () => {
+    const result = await generateWithSilentValidation({
+        prompt: "가정통신문을 작성하세요.",
+        minTargetChars: 0,
+        targetChars: 600,
+        mode: "letter",
+        requiredTerms: ["여름방학"],
+        bannedTerms: ["겨울방학", "새 학기"],
+        maxRepairAttempts: 1,
+        generateOnce: async () => "성실한 태도로 학교생활에 참여하며 친구들과 원만하게 지내는 모습이 돋보였습니다.",
+    });
+
+    assert.equal(result.validation.ok, true);
+    assert.match(result.text, /여름방학/);
+    assert.doesNotMatch(result.text, /학업,\s*건강/);
+    assert.doesNotMatch(result.text, /이러한 성장이 생활 습관으로 자연스럽게 이어질 수 있도록 가정에서 차분히 살펴봐 주시기 바랍니다/);
+});
+
+test("generateWithSilentValidation preserves required letter terms after byte fitting", async () => {
+    const result = await generateWithSilentValidation({
+        prompt: "가정통신문을 작성하세요.",
+        maxTargetBytes: 360,
+        minTargetBytes: 0,
+        targetChars: 600,
+        mode: "letter",
+        requiredTerms: ["여름방학"],
+        bannedTerms: ["겨울방학", "새 학기"],
+        maxRepairAttempts: 1,
+        generateOnce: async () => "학업에 성실히 참여하며 친구관계를 소중히 여기는 태도가 돋보였습니다. 가족관계를 돌아보며 건강한 생활 습관을 이어 가기 바랍니다.",
+    });
+
+    assert.equal(result.validation.ok, true);
+    assert.match(result.text, /여름방학/);
+    assert.doesNotMatch(result.text, /학업,\s*건강,\s*친구관계,\s*가족관계/);
+});
+
+test("generateWithSilentValidation expands repaired letter text to the byte minimum", async () => {
+    const result = await generateWithSilentValidation({
+        prompt: "가정통신문을 작성하세요.",
+        maxTargetBytes: 600,
+        minTargetBytes: 510,
+        targetChars: 600,
+        mode: "letter",
+        requiredTerms: ["여름방학"],
+        bannedTerms: ["겨울방학", "새 학기"],
+        maxRepairAttempts: 1,
+        generateOnce: async () => "친구관계가 원만하고 학업에 성실히 참여했습니다.",
+    });
+
+    assert.equal(result.validation.ok, true);
+    assert.equal(result.acceptedWithLengthWarning, undefined);
+    assert.doesNotMatch(result.text, /학업,\s*건강,\s*친구관계,\s*가족관계/);
+    assert.doesNotMatch(result.text, /성장 흐름.*이 흐름/s);
+});
+
+test("generateWithSilentValidation can accept a small byte gap in letter output", async () => {
+    const result = await generateWithSilentValidation({
+        prompt: "가정통신문을 작성하세요.",
+        maxTargetBytes: 600,
+        minTargetBytes: 510,
+        targetChars: 600,
+        mode: "letter",
+        requiredTerms: ["겨울방학", "새 학기"],
+        bannedTerms: ["여름방학"],
+        maxRepairAttempts: 1,
+        generateOnce: async () => "주변 친구들의 의견을 경청하고 갈등 상황에서도 배려하는 태도를 실천하여 원만한 친구관계를 유지하였습니다. 스스로 학습 계획을 세우고 꾸준히 실천하며 학업에 몰입하는 자기주도적인 모습이 매우 돋보였습니다. 겨울방학과 새 학기 준비 과정에서 가정에서 생활 리듬과 배움의 태도를 꾸준히 살피며 긍정적인 성장을 이어 갈 수 있도록 격려해 주시기 바랍니다.",
+    });
+
+    assert.equal(result.validation.ok, false);
+    assert.equal(result.acceptedWithLengthWarning, true);
+    assert.ok(result.validation.issues.every((issue) => issue.code === "under_min_bytes"));
+});
+
+test("generateWithSilentValidation accepts letter output when only length is below target", async () => {
+    const result = await generateWithSilentValidation({
+        prompt: "가정통신문을 작성하세요.",
+        maxTargetBytes: 1000,
+        minTargetBytes: 850,
+        targetChars: 1000,
+        mode: "letter",
+        requiredTerms: ["여름방학"],
+        bannedTerms: ["겨울방학", "새 학기"],
+        maxRepairAttempts: 0,
+        generateOnce: async () => "친구들의 의견을 차분히 듣고 배려하려는 태도가 한 학기 동안 꾸준히 이어졌습니다. 여름방학 동안 이러한 성장이 생활 습관으로 이어질 수 있도록 가정에서 함께 살펴봐 주시기 바랍니다.",
+    });
+
+    assert.equal(result.validation.ok, false);
+    assert.equal(result.acceptedWithLengthWarning, true);
+    assert.ok(result.validation.issues.every((issue) => issue.code === "under_min_bytes"));
 });
 
 test("generateWithSilentValidation silently retries with a repair prompt", async () => {
