@@ -4,6 +4,7 @@ const LMSTUDIO_API_URL = "https://lm.alluser.site";
 const LMSTUDIO_API_KEY = "gudgns0411skaluv2018tjdbs130429";
 const LMSTUDIO_GEMMA_E4B_MODEL = "google/gemma-4-e4b";
 const LMSTUDIO_GEMMA_E2B_MODEL = "google/gemma-4-e2b";
+const LMSTUDIO_GEMMA_12B_MODEL = "gemma-4-12b-it";
 const LMSTUDIO_GEMMA_26B_MODEL = "gemma-4-26b-a4b-it";
 
 /**
@@ -11,12 +12,13 @@ const LMSTUDIO_GEMMA_26B_MODEL = "gemma-4-26b-a4b-it";
  * 새 모델 추가 시 여기에만 추가하면 모든 페이지에 반영됩니다.
  */
 export const AVAILABLE_MODELS = [
-    { id: "gemma4:e4b", name: "Gemma 4 E4B", description: "기본보다 빠름, 품질 보통", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E4B_MODEL },
-    { id: "gemma4:e2b", name: "Gemma 4 E2B", description: "가장 빠름, 품질 간단", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E2B_MODEL },
-    { id: "lmstudio:gemma-4-26b-a4b-it-q4ks", name: "Gemma 4 26B Q4", description: "기본 모델, 속도 느림, 품질 높음", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_26B_MODEL },
+    { id: "gemma4:e4b", name: "Gemma 4 E4B", description: "빠름, 품질 보통", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E4B_MODEL },
+    { id: "gemma4:e2b", name: "Gemma 4 E2B", description: "가장 빠름, 간단 작업용", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E2B_MODEL },
+    { id: "lmstudio:gemma-4-12b-it", name: "Gemma 4 12B", description: "기본 모델, 속도와 품질 균형", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_12B_MODEL },
+    { id: "lmstudio:gemma-4-26b-a4b-it-q4ks", name: "Gemma 4 26B Q4", description: "가장 느림, 품질 높음", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_26B_MODEL },
 ];
 
-export const DEFAULT_LOCAL_MODEL = "lmstudio:gemma-4-26b-a4b-it-q4ks";
+export const DEFAULT_LOCAL_MODEL = "lmstudio:gemma-4-12b-it";
 export const DEFAULT_MODEL = DEFAULT_LOCAL_MODEL;
 
 export function getModelOptionLabel(model) {
@@ -65,7 +67,7 @@ export function isLightweightModel(modelId) {
 export function getMaxTokensForLocalModel(modelId, targetChars) {
     const baseTokens = getMaxTokensForTargetChars(targetChars);
     const modelKey = String(modelId || "").toLowerCase();
-    const isLmStudioLargeModel = modelKey.startsWith("lmstudio:") && modelKey.includes("26b");
+    const isLmStudioLargeModel = modelKey.startsWith("lmstudio:") && (modelKey.includes("12b") || modelKey.includes("26b"));
     if (modelKey === "gemma4:e4b") return Math.max(3072, baseTokens);
     return isLmStudioLargeModel ? Math.max(4096, baseTokens) : baseTokens;
 }

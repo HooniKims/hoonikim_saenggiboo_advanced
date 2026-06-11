@@ -209,12 +209,14 @@ test("local model list only exposes LM Studio-backed Gemma models", async () => 
     assert.deepEqual(localModels.map((model) => model.id), [
         "gemma4:e4b",
         "gemma4:e2b",
+        "lmstudio:gemma-4-12b-it",
         "lmstudio:gemma-4-26b-a4b-it-q4ks",
     ]);
     assert.deepEqual(localModels.map(getModelOptionLabel), [
-        "Gemma 4 E4B - 기본보다 빠름, 품질 보통",
-        "Gemma 4 E2B - 가장 빠름, 품질 간단",
-        "Gemma 4 26B Q4 - 기본 모델, 속도 느림, 품질 높음",
+        "Gemma 4 E4B - 빠름, 품질 보통",
+        "Gemma 4 E2B - 가장 빠름, 간단 작업용",
+        "Gemma 4 12B - 기본 모델, 속도와 품질 균형",
+        "Gemma 4 26B Q4 - 가장 느림, 품질 높음",
     ]);
 
     const requests = [];
@@ -247,8 +249,9 @@ test("local model list only exposes LM Studio-backed Gemma models", async () => 
         globalThis.fetch = originalFetch;
     }
 
-    assert.equal(requests.length, 3);
+    assert.equal(requests.length, 4);
     assert.deepEqual(requests.map((request) => request.url), [
+        "https://lm.alluser.site/v1/chat/completions",
         "https://lm.alluser.site/v1/chat/completions",
         "https://lm.alluser.site/v1/chat/completions",
         "https://lm.alluser.site/v1/chat/completions",
@@ -256,15 +259,17 @@ test("local model list only exposes LM Studio-backed Gemma models", async () => 
     assert.deepEqual(requests.map((request) => request.body.model), [
         "google/gemma-4-e4b",
         "google/gemma-4-e2b",
+        "gemma-4-12b-it",
         "gemma-4-26b-a4b-it",
     ]);
     assert.equal(requests.every((request) => request.headers["X-API-Key"] === "gudgns0411skaluv2018tjdbs130429"), true);
     assert.equal(requests.every((request) => request.body.reasoning_effort === "none"), true);
 });
 
-test("large local 26B models get expanded max token budget", () => {
+test("larger LM Studio local models get expanded max token budget", () => {
     assert.equal(getMaxTokensForLocalModel("gemma4:e2b", 589), 2003);
     assert.equal(getMaxTokensForLocalModel("gemma4:e4b", 589), 3072);
+    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 589), 4096);
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-26b-a4b-it-q4ks", 589), 4096);
 });
 
