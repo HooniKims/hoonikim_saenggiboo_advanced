@@ -1,36 +1,107 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 생기부 문장 생성 도우미
 
-## Getting Started
+초보자 선생님도 쉽게 사용할 수 있도록 만든 학교생활기록부 문장 생성 웹앱입니다. 학생별 활동 내용을 입력하면 과목별 세부능력 및 특기사항, 동아리 특기사항, 행동특성 및 종합의견, 학기말 가정통신문 문장을 생성할 수 있습니다.
 
-First, run the development server:
+## 무엇을 할 수 있나요?
+
+- 과세특 생성: 공통 활동과 학생별 개별 활동을 바탕으로 과목 세특 문장을 만듭니다.
+- 활동별 A/B/C 반영: 같은 학생 안에서도 활동마다 성취도 표현 강도를 다르게 조절합니다.
+- 동아리 문장 생성: 동아리 활동 과정, 참여 태도, 협력 내용을 문장으로 정리합니다.
+- 행동특성 생성: 관찰 내용을 바탕으로 인성, 협력, 책임감이 드러나는 문장을 만듭니다.
+- 가정통신문 생성: 방학 생활 지도와 학습 습관 안내 문장을 자연스러운 경어체로 만듭니다.
+- 웹 검색 보강: Tavily 검색을 사용해 입력한 활동의 배경 맥락을 보강할 수 있습니다.
+- 엑셀 활용: 학생 명단과 입력 자료를 불러와 여러 학생 문장을 한 번에 다룰 수 있습니다.
+
+## 실행 방법
+
+먼저 Node.js가 설치되어 있어야 합니다.
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+실행 후 브라우저에서 아래 주소를 엽니다.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+```text
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 화면별 사용법
 
-## Learn More
+### 과세특
 
-To learn more about Next.js, take a look at the following resources:
+1. 과목명과 활동 내용을 입력합니다.
+2. 학생별 개별 활동 내용이 있으면 함께 입력합니다.
+3. 활동별 성취도를 A, B, C 중에서 선택합니다.
+4. 필요한 경우 웹 검색 보강을 켭니다.
+5. 생성 버튼을 눌러 문장을 확인합니다.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 동아리
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. 동아리명과 공통 활동을 입력합니다.
+2. 학생별로 다르게 반영할 활동을 입력합니다.
+3. 생성된 문장에서 동아리명이나 과거형 표현이 들어가지 않도록 앱이 내부 규칙으로 점검합니다.
 
-## Deploy on Vercel
+### 행동특성
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. 학생에게서 관찰한 행동을 짧게 입력합니다.
+2. 배려, 협력, 책임감, 성장 가능성이 드러나도록 문장을 생성합니다.
+3. 부정적으로 보일 수 있는 내용도 교사용 문장으로 부드럽게 바꾸는 것을 목표로 합니다.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### 가정통신문
+
+1. 방학, 학습, 건강, 친구 관계, 가족 대화처럼 안내하고 싶은 키워드를 입력합니다.
+2. 생성 버튼을 누르면 학부모님께 전달하기 좋은 경어체 문장이 생성됩니다.
+3. 가정통신문은 생활기록부 문장과 달리 자연스러운 안내문 생성 여부를 중심으로 확인합니다.
+
+## AI 모델과 검색 설정
+
+기본 로컬 모델은 `Gemma 4 12B`입니다.
+
+웹 검색 보강을 사용하려면 `.env`에 Tavily API 키가 필요합니다.
+
+```env
+TAVILY_API_URL=https://api.tavily.com/v1
+TAVILY_API_KEY=your_tavily_api_key
+```
+
+LM Studio 또는 원격 로컬 LLM 서버를 사용할 때는 아래 값도 확인합니다.
+
+```env
+LMSTUDIO_API_URL=https://lm.alluser.site
+LMSTUDIO_API_KEY=your_api_key
+```
+
+## 선생님 사용 팁
+
+- 입력 자료가 구체적일수록 결과 문장도 구체적입니다.
+- 학생이 실제로 하지 않은 활동은 입력하지 않는 것이 좋습니다.
+- 생성 문장은 초안입니다. 제출 전에는 반드시 선생님이 학생 사실과 표현을 직접 확인해 주세요.
+- 웹 검색 보강 자료는 배경 이해용입니다. 검색 결과를 학생 활동처럼 꾸며 쓰지 않도록 주의해 주세요.
+
+## 개발자용 명령어
+
+```bash
+npm test
+npm run build
+```
+
+- `npm test`: 생성 규칙, 검색 보강, 모델 라우팅, 페이지 연결 테스트를 실행합니다.
+- `npm run build`: 배포 가능한 Next.js 앱으로 빌드되는지 확인합니다.
+
+## 폴더 구조
+
+```text
+app/              화면과 API 라우트
+components/       공통 UI 컴포넌트
+utils/            생성, 검증, 검색, 엑셀 처리 로직
+tests/            자동 테스트
+sample data/      예시 엑셀 파일
+```
+
+## 주의 사항
+
+- `.env`의 API 키는 공개 저장소에 올리지 마세요.
+- 생성 결과는 최종 제출물이 아니라 검토용 초안입니다.
+- 학교생활기록부 용어와 문체는 학교 기준에 맞게 최종 확인이 필요합니다.

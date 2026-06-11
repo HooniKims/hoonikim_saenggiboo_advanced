@@ -4,7 +4,17 @@ import { readFileSync } from "node:fs";
 
 const readPage = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("club page keeps 과세특 search augmentation flow", () => {
+test("gwasetuk page keeps search augmentation flow", () => {
+    const source = readPage("app/gwasetuk/page.js");
+
+    assert.match(source, /fetchSearchContext/);
+    assert.match(source, /useWebSearchContext/);
+    assert.match(source, /학생 개별 활동 내용 웹 검색 보강/);
+    assert.match(source, /웹 검색 보강 중/);
+    assert.match(source, /searchContextText/);
+});
+
+test("club page keeps search augmentation flow", () => {
     const source = readPage("app/club/page.js");
 
     assert.match(source, /fetchSearchContext/);
