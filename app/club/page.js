@@ -289,7 +289,7 @@ export default function ClubPage() {
         ).join(", ");
 
         const individualActivityText = individualActivity.trim()
-            ? `\n\n[이 학생의 개별 활동 내용]\n${individualActivity}\n(위 개별 활동 내용은 공통 활동을 보강하기 위한 자료입니다. 활동 내용 목록의 순서를 유지하고, 개별 활동 내용을 첫 문장이나 첫 활동처럼 우선 배치하지 않음. 공통 활동 흐름 안에서 필요한 곳에 자연스럽게 통합해 주세요.)`
+            ? `\n\n[이 학생의 개별 활동 내용]\n${individualActivity}\n(위 개별 활동 내용은 반드시 최종 본문에 반영해야 하는 학생별 수행 내용입니다. 활동 내용 목록의 순서를 유지하고, 개별 활동 내용을 첫 문장이나 첫 활동처럼 우선 배치하지 않음. 개별 활동의 핵심어와 구체적 수행 내용을 누락하지 않음. 공통 활동 흐름 안에서 필요한 곳에 자연스럽게 통합해 주세요.)`
             : "";
         const searchContextText = searchContext.trim()
             ? `\n\n[학생 개별 활동 내용 기반 웹 검색 보강 자료]\n${searchContext}\n(위 검색 보강 자료는 개별 활동을 정확히 이해하기 위한 배경 자료입니다. 학생이 실제로 입력한 활동과 공통 활동 내용을 우선하고, 검색 자료는 관련 개념·활동 맥락·쟁점 이해를 보강하는 데에만 사용하세요.)`

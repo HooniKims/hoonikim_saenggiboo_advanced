@@ -13,6 +13,7 @@ import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import { generateWithSilentValidation } from "../../utils/generationHarness";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { buildLetterRuleTermInstruction, buildLetterVariationInstruction, buildShuffledKeywordContext, getLetterBannedTerms, getLetterRequiredTerms } from "../../utils/letterKeywords";
+import { fetchSearchContext } from "../../utils/searchContextFetch";
 
 export default function LetterPage() {
     // State
@@ -25,6 +26,7 @@ export default function LetterPage() {
     const [manualLength, setManualLength] = useState("");
     const [isGenerating, setIsGenerating] = useState(false);
     const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
+    const [useWebSearchContext, setUseWebSearchContext] = useState(false);
     const [copiedId, setCopiedId] = useState(null);
     const fileInputRef = useRef(null);
     const {
@@ -171,7 +173,7 @@ export default function LetterPage() {
 
     // 생성 결과 검증과 후처리는 generationHarness에서 내부 처리됨
 
-    const generatePrompt = (targetChars) => {
+    const generatePrompt = (targetChars, searchContext = "") => {
         let minChar, maxChar;
         if (targetChars === 200) {
             minChar = 150; maxChar = 200;
@@ -195,11 +197,14 @@ export default function LetterPage() {
         const periodGoal = season === "summer"
             ? "한 학기 동안 학교생활을 성실하게 수행했다는 일반적인 평가와 여름방학 동안 가정에서 살필 조언"
             : "한 해 동안 학교생활을 성실하게 수행했다는 일반적인 평가와 겨울방학 및 새 학기 준비를 위해 가정에서 살필 조언";
+        const searchContextText = searchContext.trim()
+            ? `\n\n[가정통신문 키워드 기반 웹 검색 보강 자료]\n${searchContext}\n(위 검색 보강 자료는 방학 생활 지도, 학습 습관, 건강한 생활 리듬, 관계 형성 조언의 일반적 배경을 이해하기 위한 자료입니다. 학생이 실제로 보인 구체적 활동이나 관찰 사실처럼 꾸며 쓰지 말고, 가정에서 살필 조언의 표현을 자연스럽게 보강하는 데에만 사용하세요.)`
+            : "";
 
         return `당신은 담임 교사입니다. 학기말 통지표에 들어갈 '가정통신문(종합의견)' 본문을 작성하세요.
 
 <입력 정보>
-${keywordContext}
+${keywordContext}${searchContextText}
 
 <작성 규칙>
 1. 작성 내용: ${periodGoal}을 객관적이고 따뜻하게 기술할 것
@@ -241,11 +246,29 @@ ${lengthInstruction}
         const targetChars = normalizeTargetChars(textLength, manualLength);
         const minTargetBytes = getMinimumTargetBytes(targetBytes);
 
-        const prompt = generatePrompt(targetChars);
-
         try {
             updateStudent(student.id, "status", "loading");
             updateStudent(student.id, "progress", "생성 준비 중...");
+            let searchContext = "";
+            if (useWebSearchContext && keywords.trim()) {
+                try {
+                    updateStudent(student.id, "progress", "웹 검색 보강 중...");
+                    const periodText = season === "summer" ? "여름방학 생활 지도" : "겨울방학 새 학기 생활 지도";
+                    const searchResult = await fetchSearchContext({
+                        subjectName: "가정통신문",
+                        commonActivities: [periodText],
+                        individualActivity: keywords,
+                    });
+                    searchContext = searchResult.context || "";
+                    if (searchResult.query) {
+                        console.log(`[웹 검색 보강] 학생 ${student.id}: ${searchResult.query}`);
+                    }
+                } catch (searchError) {
+                    console.warn(`[웹 검색 보강 실패] 학생 ${student.id}: ${searchError.message}`);
+                }
+            }
+
+            const prompt = generatePrompt(targetChars, searchContext);
             const generationResult = await generateWithSilentValidation({
                 prompt,
                 maxTargetBytes: targetBytes,
@@ -491,6 +514,35 @@ ${lengthInstruction}
                             selectedOpenAIModel={selectedOpenAIModel}
                             setSelectedOpenAIModel={setSelectedOpenAIModel}
                         />
+
+                        <label
+                            className="form-label"
+                            style={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: '10px',
+                                padding: '12px',
+                                border: '1px solid #fed7aa',
+                                borderRadius: '8px',
+                                backgroundColor: '#fff7ed',
+                                cursor: 'pointer',
+                                lineHeight: 1.45
+                            }}
+                        >
+                            <input
+                                type="checkbox"
+                                checked={useWebSearchContext}
+                                onChange={(e) => setUseWebSearchContext(e.target.checked)}
+                                style={{ marginTop: '3px', flexShrink: 0 }}
+                            />
+                            <span>
+                                <strong>가정통신문 키워드 웹 검색 보강</strong>
+                                <br />
+                                <span style={{ color: '#6b7280', fontSize: '0.8rem', fontWeight: 400 }}>
+                                    강조 키워드를 검색해 방학 생활 지도와 가정 조언의 표현 맥락을 보강합니다.
+                                </span>
+                            </span>
+                        </label>
 
                         <div className="flex gap-2 mt-auto">
                             <button

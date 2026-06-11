@@ -54,6 +54,16 @@ test("pages tell the model to start with selected activity one before individual
     assert.match(clubSource, /개별 활동 내용을 첫 문장이나 첫 활동처럼 우선 배치하지 않음/);
 });
 
+test("subject and club prompts require individual activity details to be reflected", () => {
+    const gwasetukSource = readFileSync(new URL("../app/gwasetuk/page.js", import.meta.url), "utf8");
+    const clubSource = readFileSync(new URL("../app/club/page.js", import.meta.url), "utf8");
+
+    assert.match(gwasetukSource, /개별 활동 내용은 반드시 최종 본문에 반영/);
+    assert.match(gwasetukSource, /개별 활동의 핵심어와 구체적 수행 내용을 누락하지 않음/);
+    assert.match(clubSource, /개별 활동 내용은 반드시 최종 본문에 반영/);
+    assert.match(clubSource, /개별 활동의 핵심어와 구체적 수행 내용을 누락하지 않음/);
+});
+
 test("club prompt avoids fixed report-writing openings and asks for varied starts", () => {
     const clubSource = readFileSync(new URL("../app/club/page.js", import.meta.url), "utf8");
 

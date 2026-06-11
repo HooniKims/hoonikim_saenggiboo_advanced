@@ -25,6 +25,16 @@ test("behavior page keeps 과세특 instruction and search augmentation flow", (
     assert.match(source, /searchContextText/);
 });
 
+test("letter page keeps home-letter search augmentation flow", () => {
+    const source = readPage("app/letter/page.js");
+
+    assert.match(source, /fetchSearchContext/);
+    assert.match(source, /useWebSearchContext/);
+    assert.match(source, /가정통신문 키워드 웹 검색 보강/);
+    assert.match(source, /웹 검색 보강 중/);
+    assert.match(source, /searchContextText/);
+});
+
 test("club prompt applies advanced content-quality guidance only for high school", () => {
     const source = readPage("app/club/page.js");
 
