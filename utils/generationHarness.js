@@ -207,9 +207,14 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
     const minAllowed = Math.max(0, Math.min(Math.floor(Number(minTargetChars) || 0), maxAllowed));
     const minAllowedBytes = Math.max(0, Math.floor(Number(minTargetBytes) || 0));
     const maxAllowedBytes = Math.max(0, Math.floor(Number(maxTargetBytes) || 0));
-    const issueText = (issues || [])
+    const currentBytes = getUtf8ByteLength(text);
+    const missingBytes = Math.max(0, minAllowedBytes - currentBytes);
+    const byteShortfallText = minAllowedBytes > 0 && missingBytes > 0
+        ? `\n[Byte shortfall]\n- Current bytes: ${currentBytes}byte\n- Missing bytes: ${missingBytes}byte\n- Write 430-500 Korean visible characters for the 1500byte setting.\n- Add enough concrete Korean content while staying under ${maxAllowedBytes || maxAllowed}byte.\n`
+        : "";
+    const issueText = `${(issues || [])
         .map((issue) => `- ${issue.message}${issue.detail ? `: ${issue.detail}` : ""}`)
-        .join("\n");
+        .join("\n")}${byteShortfallText}`;
     const forbiddenText = getForbiddenTerms(forbiddenTerms).length
         ? `\n- 다음 용어는 출력하지 않음: ${getForbiddenTerms(forbiddenTerms).join(", ")}`
         : "";

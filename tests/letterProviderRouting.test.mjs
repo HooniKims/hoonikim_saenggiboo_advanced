@@ -31,7 +31,7 @@ test("OpenAI letter requests use a dedicated polite letter system message", asyn
             prompt: "가정통신문을 작성하세요.",
             apiKey: "test-key",
             targetChars: 120,
-            model: "gpt-5-mini",
+            model: "gpt-5.4-nano",
             outputType: "letter",
         }));
 
@@ -143,7 +143,7 @@ test("client provider helpers preserve letter output type in API requests", asyn
             prompt: "가정통신문을 작성하세요.",
             apiKey: "test-key",
             targetChars: 120,
-            model: "gpt-5-mini",
+            model: "gpt-5.4-nano",
             outputType: "letter",
         });
         await fetchNvidiaCompletion({

@@ -6,6 +6,7 @@ import {
     generateWithSilentValidation,
     validateGeneratedText,
 } from "../utils/generationHarness.js";
+import { getUtf8ByteLength } from "../utils/textProcessor.js";
 
 test("validateGeneratedText detects strict record-rule violations", () => {
     const validation = validateGeneratedText(
@@ -430,6 +431,26 @@ test("buildRepairPrompt preserves source facts and expands with Why-How-What-Lea
     assert.match(prompt, /Learn\(성장\)/);
     assert.match(prompt, /입력된 활동/);
     assert.match(prompt, /새 사실.*지어내지/);
+});
+
+test("buildRepairPrompt makes byte shortfall explicit for long byte targets", () => {
+    const text = "媛".repeat(100) + "??";
+    const currentBytes = getUtf8ByteLength(text);
+    const minTargetBytes = 1275;
+    const prompt = buildRepairPrompt({
+        text,
+        issues: [{ code: "under_min_bytes", message: "紐⑺몴 byte 誘몃떖", detail: "902/1275byte" }],
+        sourcePrompt: "?먮낯 ?묒꽦 議곌굔",
+        maxTargetBytes: 1500,
+        minTargetBytes,
+        targetChars: 589,
+        mode: "record",
+    });
+
+    assert.ok(prompt.includes(`Current bytes: ${currentBytes}byte`));
+    assert.ok(prompt.includes(`Missing bytes: ${minTargetBytes - currentBytes}byte`));
+    assert.ok(prompt.includes("under 1500byte"));
+    assert.ok(prompt.includes("Write 430-500 Korean visible characters"));
 });
 
 test("generateWithSilentValidation can reject final output when length-only acceptance is disabled", async () => {

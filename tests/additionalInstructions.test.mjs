@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { fetchOpenAICompletion } from "../utils/openAIFetch.js";
+import { DEFAULT_OPENAI_MODEL, fetchOpenAICompletion, normalizeOpenAIModel, OPENAI_MODELS } from "../utils/openAIFetch.js";
 import { AVAILABLE_MODELS, fetchStream, getLocalModelConfig, getMaxTokensForLocalModel, getModelOptionLabel } from "../utils/streamFetch.js";
 import { POST } from "../app/api/openai-generate/route.js";
 
@@ -279,6 +279,16 @@ test("unknown local model fallback also uses lm.alluser.site", () => {
     assert.equal(config.apiUrl, "https://lm.alluser.site");
 });
 
+test("OpenAI model list exposes only GPT-5.4 nano", () => {
+    assert.deepEqual(OPENAI_MODELS, [
+        { id: "gpt-5.4-nano", name: "GPT-5.4 nano" },
+    ]);
+    assert.equal(DEFAULT_OPENAI_MODEL, "gpt-5.4-nano");
+    assert.equal(normalizeOpenAIModel("gpt-5-mini"), "gpt-5.4-nano");
+    assert.equal(normalizeOpenAIModel("gpt-5.4-mini"), "gpt-5.4-nano");
+    assert.equal(normalizeOpenAIModel("gpt-5.4-nano"), "gpt-5.4-nano");
+});
+
 test("fetchOpenAICompletion sends additional instructions to the OpenAI route", async () => {
     let requestBody = null;
     const originalFetch = globalThis.fetch;
@@ -293,7 +303,7 @@ test("fetchOpenAICompletion sends additional instructions to the OpenAI route", 
             additionalInstructions: "개인별 수행 내용을 기준으로 작성",
             apiKey: "sk-test",
             targetChars: 100,
-            model: "gpt-5-mini",
+            model: "gpt-5.4-nano",
         });
     } finally {
         globalThis.fetch = originalFetch;
@@ -324,7 +334,7 @@ test("OpenAI route reinforces additional instructions in both system and user me
                 additionalInstructions: "개인별 수행 내용을 기준으로 작성",
                 apiKey: "sk-test",
                 targetChars: 100,
-                model: "gpt-5-mini",
+                model: "gpt-5.4-nano",
             }),
         }));
         assert.equal(response.ok, true);
@@ -335,8 +345,42 @@ test("OpenAI route reinforces additional instructions in both system and user me
     assert.match(openAIRequestBody.messages[0].content, /【최우선 지침】[\s\S]*개인별 수행 내용을 기준으로 작성/);
     assert.match(openAIRequestBody.messages[1].content, /^\[최우선 규칙\].*개인별 수행 내용을 기준으로 작성/s);
     assert.match(openAIRequestBody.messages[1].content, /\[다시 한번 강조\].*개인별 수행 내용을 기준으로 작성$/s);
-    assert.equal(openAIRequestBody.reasoning_effort, "minimal");
+    assert.equal(openAIRequestBody.reasoning_effort, "none");
     assert.equal(openAIRequestBody.max_completion_tokens, 4096);
+});
+
+test("OpenAI route coerces legacy mini model requests to GPT-5.4 nano", async () => {
+    let openAIRequestBody = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, options) => {
+        openAIRequestBody = JSON.parse(options.body);
+        return Response.json({
+            choices: [
+                {
+                    message: { content: "?먮즺 議곗궗 怨쇱젙?먯꽌 ?듭떖 ?뺣낫瑜??뺣━?섍퀬 諛쒗몴??" },
+                },
+            ],
+        });
+    };
+
+    try {
+        const response = await POST(new Request("http://localhost/api/openai-generate", {
+            method: "POST",
+            body: JSON.stringify({
+                prompt: "?쒕룞 ?댁슜???묒꽦?섏꽭??",
+                apiKey: "sk-test",
+                targetChars: 100,
+                model: "gpt-5.4-nano",
+            }),
+        }));
+        const data = await response.json();
+        assert.equal(response.ok, true);
+        assert.equal(data.model, "gpt-5.4-nano");
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+
+    assert.equal(openAIRequestBody.model, "gpt-5.4-nano");
 });
 
 test("OpenAI route retries once when the API returns no visible text", async () => {

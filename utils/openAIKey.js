@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DEFAULT_OPENAI_MODEL } from "./openAIFetch";
+import { DEFAULT_OPENAI_MODEL, normalizeOpenAIModel } from "./openAIFetch";
 
 const OPENAI_API_KEY_STORAGE_KEY = "hoonikim_openai_api_key";
 const OPENAI_MODEL_STORAGE_KEY = "hoonikim_openai_model";
@@ -14,7 +14,12 @@ function readStoredKey() {
 
 function readStoredModel() {
     if (typeof window === "undefined") return DEFAULT_OPENAI_MODEL;
-    return window.localStorage.getItem(OPENAI_MODEL_STORAGE_KEY) || DEFAULT_OPENAI_MODEL;
+    const storedModel = window.localStorage.getItem(OPENAI_MODEL_STORAGE_KEY);
+    const normalizedModel = normalizeOpenAIModel(storedModel);
+    if (storedModel !== normalizedModel) {
+        window.localStorage.setItem(OPENAI_MODEL_STORAGE_KEY, normalizedModel);
+    }
+    return normalizedModel;
 }
 
 function notifyKeyUpdated() {
@@ -52,7 +57,7 @@ export function useOpenAIKey() {
     }, []);
 
     const setSelectedOpenAIModel = (modelId) => {
-        const nextModel = modelId || DEFAULT_OPENAI_MODEL;
+        const nextModel = normalizeOpenAIModel(modelId);
         window.localStorage.setItem(OPENAI_MODEL_STORAGE_KEY, nextModel);
         setSelectedOpenAIModelState(nextModel);
         notifyKeyUpdated();

@@ -1,5 +1,5 @@
 import { getMaxTokensForTargetChars } from "../../../utils/textProcessor.js";
-import { DEFAULT_OPENAI_MODEL, OPENAI_MODELS } from "../../../utils/openAIFetch.js";
+import { DEFAULT_OPENAI_MODEL, normalizeOpenAIModel, OPENAI_MODELS } from "../../../utils/openAIFetch.js";
 import { getLetterSystemMessage } from "../../../utils/streamFetch.js";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
@@ -62,7 +62,7 @@ async function callOpenAI({ apiKey, prompt, additionalInstructions, targetChars,
                 { role: "user", content: buildUserMessage(prompt, additionalInstructions) },
             ],
             max_completion_tokens: maxTokens,
-            reasoning_effort: "minimal",
+            reasoning_effort: "none",
         }),
     });
 
@@ -99,9 +99,7 @@ export async function POST(req) {
             return Response.json({ error: "생성할 프롬프트가 비어 있습니다." }, { status: 400 });
         }
 
-        const requestedModel = OPENAI_MODELS.some((option) => option.id === model)
-            ? model
-            : DEFAULT_OPENAI_MODEL;
+        const requestedModel = normalizeOpenAIModel(model);
 
         let { response, data } = await callOpenAI({
             apiKey: apiKey.trim(),

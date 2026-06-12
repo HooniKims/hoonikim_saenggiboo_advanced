@@ -810,3 +810,18 @@ NEIS 자동 입력 크롬 확장 프로그램 개발이 완료되었습니다.
     - [x] `npm test` 전체 94개 테스트 통과 확인
     - [x] `npm run build` 프로덕션 빌드 통과 확인
     - [x] `git diff --check` 통과 확인
+
+## Phase 58: OpenAI GPT-5.4 nano 단일화 및 1500byte 생성 검증 (2026-06-12) (완료)
+- [x] **OpenAI 모델 비용 최적화**
+    - [x] OpenAI 선택 모델을 `gpt-5.4-nano` 하나로 단일화
+    - [x] 브라우저 localStorage나 이전 요청에 남은 `gpt-5-mini`, `gpt-5.4-mini` 값은 자동으로 `gpt-5.4-nano`로 보정
+    - [x] `gpt-5.4-nano`가 지원하지 않는 `reasoning_effort: "minimal"` 대신 `reasoning_effort: "none"`으로 변경
+- [x] **1500byte 생성 보강**
+    - [x] 1500byte 설정에서 모델이 짧게 요약하지 않도록 430~500자 가시 문자 범위 안내를 추가
+    - [x] byte 미달 보정 프롬프트에 현재 byte와 부족 byte를 명시해 재작성 방향을 분명히 함
+    - [x] 입력 단서가 충분한 실제 사용형 과세특 케이스에서 `gpt-5.4-nano`가 1352byte 결과를 생성해 1275~1500byte 기준을 만족함을 확인
+- [x] **검증**
+    - [x] `.env`의 OpenAI API key로 직접 OpenAI 호출 성공 확인 (`gpt-5.4-nano-2026-03-17`, 응답 `OK`)
+    - [x] 앱의 `/api/openai-generate` 경유 호출 성공 확인 (`model: gpt-5.4-nano`)
+    - [x] `npm test` 전체 테스트 통과 확인
+    - [x] `npm run build` 프로덕션 빌드 통과 확인

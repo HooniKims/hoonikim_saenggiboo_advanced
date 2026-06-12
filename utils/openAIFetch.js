@@ -1,11 +1,17 @@
 export const OPENAI_MODELS = [
-    { id: "gpt-5-mini", name: "GPT-5 mini" },
-    { id: "gpt-5.4-mini", name: "GPT-5.4 mini" },
+    { id: "gpt-5.4-nano", name: "GPT-5.4 nano" },
 ];
 export const DEFAULT_OPENAI_MODEL = OPENAI_MODELS[0].id;
 
+export function normalizeOpenAIModel(modelId) {
+    return OPENAI_MODELS.some((model) => model.id === modelId)
+        ? modelId
+        : DEFAULT_OPENAI_MODEL;
+}
+
 export function getOpenAIModelLabel(modelId) {
-    return OPENAI_MODELS.find((model) => model.id === modelId)?.name || modelId;
+    const normalizedModel = normalizeOpenAIModel(modelId);
+    return OPENAI_MODELS.find((model) => model.id === normalizedModel)?.name || normalizedModel;
 }
 
 export async function fetchOpenAICompletion({ prompt, additionalInstructions, apiKey, targetChars, model, outputType = "record" }) {
@@ -23,7 +29,7 @@ export async function fetchOpenAICompletion({ prompt, additionalInstructions, ap
             additionalInstructions,
             apiKey: apiKey.trim(),
             targetChars,
-            model: model || DEFAULT_OPENAI_MODEL,
+            model: normalizeOpenAIModel(model),
             outputType,
         }),
     });

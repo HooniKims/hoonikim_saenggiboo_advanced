@@ -109,6 +109,7 @@ export function getCharacterGuideline(targetChars, targetBytes = 0, minTargetByt
 <분량 제한>
 전체 byte: ${maxAllowedBytes}byte 이하 (초과 불가)
 목표 byte: ${minAllowedBytes || Math.floor(maxAllowedBytes * 0.85)}byte ~ ${maxAllowedBytes}byte
+Target visible length: write 430-500 Korean visible characters for the 1500byte setting.
 작성 분량 참고: 한글 기준 약 ${promptLimit}자 안팎, 공백과 문장부호에 따라 달라질 수 있음
 
 작성 방법:

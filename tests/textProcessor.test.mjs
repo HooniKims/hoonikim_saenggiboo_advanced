@@ -71,6 +71,7 @@ test("getPromptCharLimit asks the model for at least 85 percent on every limit",
 test("getCharacterGuideline guides activity expansion with Why-How-What-Learn", () => {
     const guideline = getCharacterGuideline(589, 1500, 1275);
 
+    assert.match(guideline, /430-500 Korean visible characters/);
     assert.match(guideline, /Why\(동기\)/);
     assert.match(guideline, /How\(과정\)/);
     assert.match(guideline, /What\(결과\)/);
