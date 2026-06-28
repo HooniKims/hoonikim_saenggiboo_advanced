@@ -13,8 +13,9 @@ test("gwasetuk keeps per-student activity grades aligned with activity count", (
     assert.match(source, /updateStudentActivityGrade/);
 });
 
-test("gwasetuk renders compact per-activity A B C controls for every school level", () => {
+test("gwasetuk renders compact per-activity A B C D E controls for every school level", () => {
     assert.doesNotMatch(source, /schoolLevel !== "high"/);
+    assert.match(source, /const GRADE_OPTIONS = \["A", "B", "C", "D", "E"\]/);
     assert.match(source, /activity-grade-panel/);
     assert.match(source, /activity-grade-row/);
     assert.match(source, /btn-grade-sm/);
@@ -30,8 +31,9 @@ test("gwasetuk activity grade panel lays out two activities per row without over
     assert.match(styles, /\.activity-grade-title\s*\{[\s\S]*grid-column:\s*1\s*\/\s*-1/);
     assert.match(styles, /@media\s*\(max-width:\s*420px\)\s*\{[\s\S]*\.activity-grade-panel\s*\{[\s\S]*grid-template-columns:\s*1fr/);
     assert.match(styles, /\.activity-grade-row\s*\{[\s\S]*min-width:\s*0/);
-    assert.match(styles, /\.activity-grade-row\s*\{[\s\S]*grid-template-columns:\s*max-content\s+max-content/);
+    assert.match(styles, /\.activity-grade-row\s*\{[\s\S]*grid-template-columns:\s*1fr/);
     assert.match(styles, /\.activity-grade-row\s*\{[\s\S]*justify-content:\s*start/);
+    assert.match(styles, /\.activity-grade-buttons\s*\{[\s\S]*flex-wrap:\s*wrap/);
 });
 
 test("gwasetuk generated result textarea has a taller default vertical space", () => {
@@ -64,21 +66,37 @@ test("gwasetuk keeps randomized activity order even when individual activity exi
     assert.match(source, /개별 활동 내용을 첫 문장이나 첫 활동처럼 우선 배치하지 않음/);
 });
 
-test("gwasetuk prompt defines visibly different writing strength for A B C", () => {
+test("gwasetuk styles selected A through E grade buttons", () => {
+    assert.match(styles, /\.btn-grade\.selected\.grade-A/);
+    assert.match(styles, /\.btn-grade\.selected\.grade-B/);
+    assert.match(styles, /\.btn-grade\.selected\.grade-C/);
+    assert.match(styles, /\.btn-grade\.selected\.grade-D/);
+    assert.match(styles, /\.btn-grade\.selected\.grade-E/);
+});
+
+test("gwasetuk prompt defines visibly different writing strength for A through E", () => {
     assert.match(source, /A\(매우 잘함\)/);
     assert.match(source, /B\(잘함\)/);
-    assert.match(source, /C\(노력 필요\)/);
+    assert.match(source, /C\(보완 필요\)/);
+    assert.match(source, /D\(많은 보완 필요\)/);
+    assert.match(source, /E\(매우 많은 보완 필요\)/);
     assert.match(source, /등급별 표현 사전/);
     assert.match(source, /A 전용 권장 표현/);
     assert.match(source, /B 전용 권장 표현/);
     assert.match(source, /C 전용 권장 표현/);
+    assert.match(source, /D 전용 권장 표현/);
+    assert.match(source, /E 전용 권장 표현/);
     assert.match(source, /등급 간 대비 규칙/);
     assert.match(source, /B 활동에는 탁월함·돋보임·뛰어남·심화·주도적 같은 A급 표현을 쓰지 않음/);
-    assert.match(source, /C 활동에는 기준점에 아직 충분히 도달하지 못한 부분/);
+    assert.match(source, /C 활동에는 일부 기준점에 아직 충분히 도달하지 못한 부분/);
+    assert.match(source, /D 활동은 C보다 더 뚜렷하게 반복적인 안내와 보완 필요성을 드러냄/);
+    assert.match(source, /E 활동은 D보다 더 낮은 수행 수준으로/);
     assert.match(source, /잘 해냄 기조/);
-    assert.match(source, /추가적인 노력이 필요한 지점/);
+    assert.match(source, /단계적인 보완이 필요한 지점/);
+    assert.match(source, /지속적인 개별 지도와 기초 학습 지원이 필요한 지점/);
     assert.match(source, /비난하거나 낙인찍는 표현은 사용하지 않음/);
-    assert.match(source, /B는 노력하며 수행한 모습, C는 추가적인 노력이 필요한 모습/);
+    assert.match(source, /B는 안정적 수행, C는 부분 보완, D는 많은 보완, E는 매우 많은 보완/);
     assert.match(source, /C 활동은 B 수준의 안정적 수행으로 올려 쓰지 않음/);
-    assert.match(source, /선택한 A\/B\/C 등급 문구를 그대로 반복하지 말고/);
+    assert.match(source, /D와 E 활동을 C 수준으로 완화하지 않음/);
+    assert.match(source, /선택한 A\/B\/C\/D\/E 등급 문구를 그대로 반복하지 말고/);
 });

@@ -671,6 +671,18 @@ button {
   border-color: #f97316;
 }
 
+.btn-grade.selected.grade-D {
+  background-color: #fef2f2;
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.btn-grade.selected.grade-E {
+  background-color: #f3f4f6;
+  color: #4b5563;
+  border-color: #4b5563;
+}
+
 .activity-grade-panel {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -690,10 +702,10 @@ button {
 
 .activity-grade-row {
   display: grid;
-  grid-template-columns: max-content max-content;
+  grid-template-columns: 1fr;
   justify-content: start;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -709,15 +721,16 @@ button {
 
 .activity-grade-buttons {
   display: flex;
-  gap: 3px;
+  flex-wrap: wrap;
+  gap: 2px;
 }
 
 .btn-grade.btn-grade-sm {
-  width: 22px;
+  width: 20px;
   height: 24px;
   border-width: 1px;
   border-radius: 6px;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
 }
 
 @media (max-width: 420px) {
