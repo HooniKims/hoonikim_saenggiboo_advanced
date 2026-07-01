@@ -137,7 +137,7 @@ export default function Home() {
           <div className="youtube-container" style={{ position: 'relative', paddingBottom: '56.25%', height: 0, borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
             <iframe
               style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
-              src="https://www.youtube.com/embed/Huju2ksl530"
+              src="https://www.youtube.com/embed/N0bsmOfK1YA"
               title="YouTube video player"
               frameBorder="0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
