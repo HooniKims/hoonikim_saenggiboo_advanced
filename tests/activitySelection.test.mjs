@@ -84,6 +84,43 @@ test("recognizes bracketed and number-first activity labels in individual detail
     assert.equal(result.remainingIndividualActivity, "");
 });
 
+test("assigns unlabeled individual detail lines by original activity order", () => {
+    const selectedEntries = [
+        { text: "보고서 작성", originalIndex: 2 },
+        { text: "토론 활동", originalIndex: 0 },
+        { text: "자료 조사", originalIndex: 1 },
+    ];
+
+    const result = mergeNumberedIndividualActivities(
+        selectedEntries,
+        "반론 정리를 맡음\n통계 자료를 보완함\n자료 분석을 정리함",
+    );
+
+    assert.deepEqual(
+        result.activities.map(entry => entry.text),
+        [
+            "보고서 작성\n  (이 학생 개별 수행: 자료 분석을 정리함)",
+            "토론 활동\n  (이 학생 개별 수행: 반론 정리를 맡음)",
+            "자료 조사\n  (이 학생 개별 수행: 통계 자료를 보완함)",
+        ],
+    );
+    assert.equal(result.remainingIndividualActivity, "");
+});
+
+test("matches out-of-order unlabeled details to the most relevant activity", () => {
+    const result = mergeNumberedIndividualActivities(
+        ["토론 활동", "자료 조사", "보고서 작성"],
+        "보고서 초안에 근거를 보완함\n토론에서 반론을 정리함\n자료 조사에서 통계 자료를 보완함",
+    );
+
+    assert.deepEqual(result.activities, [
+        "토론 활동\n  (이 학생 개별 수행: 토론에서 반론을 정리함)",
+        "자료 조사\n  (이 학생 개별 수행: 자료 조사에서 통계 자료를 보완함)",
+        "보고서 작성\n  (이 학생 개별 수행: 보고서 초안에 근거를 보완함)",
+    ]);
+    assert.equal(result.remainingIndividualActivity, "");
+});
+
 test("keeps unnumbered individual details as general individual context", () => {
     const result = mergeNumberedIndividualActivities(
         ["탐구 발표"],
