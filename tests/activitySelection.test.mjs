@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+    mergeNumberedIndividualActivities,
     limitActivitiesByTargetChars,
     shouldSelectRandomFourActivities,
 } from "../utils/activitySelection.js";
@@ -34,6 +35,67 @@ test("limits selected activities by target character budget", () => {
     assert.deepEqual(limitActivitiesByTargetChars(activities, 351), activities);
 });
 
+test("merges numbered individual details into the matching original activity", () => {
+    const selectedEntries = [
+        { text: "보고서 작성", originalIndex: 2 },
+        { text: "토론 활동", originalIndex: 0 },
+    ];
+
+    const result = mergeNumberedIndividualActivities(
+        selectedEntries,
+        "활동1: 반론 정리를 맡음\n활동3: 자료 분석을 보완함",
+    );
+
+    assert.deepEqual(
+        result.activities.map(entry => entry.text),
+        [
+            "보고서 작성\n  (이 학생 개별 수행: 자료 분석을 보완함)",
+            "토론 활동\n  (이 학생 개별 수행: 반론 정리를 맡음)",
+        ],
+    );
+    assert.equal(result.remainingIndividualActivity, "");
+});
+
+test("recognizes loose activity number labels in individual details", () => {
+    const result = mergeNumberedIndividualActivities(
+        ["토론 활동", "자료 조사", "보고서 작성"],
+        "활동 1 - 반론 정리를 맡음\n2번 활동은 통계 자료를 보완함\n활동3 자료 분석을 정리함",
+    );
+
+    assert.deepEqual(result.activities, [
+        "토론 활동\n  (이 학생 개별 수행: 반론 정리를 맡음)",
+        "자료 조사\n  (이 학생 개별 수행: 통계 자료를 보완함)",
+        "보고서 작성\n  (이 학생 개별 수행: 자료 분석을 정리함)",
+    ]);
+    assert.equal(result.remainingIndividualActivity, "");
+});
+
+test("recognizes bracketed and number-first activity labels in individual details", () => {
+    const result = mergeNumberedIndividualActivities(
+        ["토론 활동", "자료 조사", "보고서 작성"],
+        "(활동1) 반론 정리를 맡음\n[2 활동] 통계 자료를 보완함\n3. 자료 분석을 정리함",
+    );
+
+    assert.deepEqual(result.activities, [
+        "토론 활동\n  (이 학생 개별 수행: 반론 정리를 맡음)",
+        "자료 조사\n  (이 학생 개별 수행: 통계 자료를 보완함)",
+        "보고서 작성\n  (이 학생 개별 수행: 자료 분석을 정리함)",
+    ]);
+    assert.equal(result.remainingIndividualActivity, "");
+});
+
+test("keeps unnumbered individual details as general individual context", () => {
+    const result = mergeNumberedIndividualActivities(
+        ["탐구 발표"],
+        "발표 태도가 차분함\n활동1: 질문 답변을 맡음",
+    );
+
+    assert.deepEqual(result.activities, [
+        "탐구 발표\n  (이 학생 개별 수행: 질문 답변을 맡음)",
+    ]);
+    assert.equal(result.remainingIndividualActivity, "발표 태도가 차분함");
+});
+
 test("pages apply random-four instruction before generation prompt is built", () => {
     const gwasetukSource = readFileSync(new URL("../app/gwasetuk/page.js", import.meta.url), "utf8");
     const clubSource = readFileSync(new URL("../app/club/page.js", import.meta.url), "utf8");
@@ -41,7 +103,17 @@ test("pages apply random-four instruction before generation prompt is built", ()
     assert.match(gwasetukSource, /shouldSelectRandomFourActivities\(additionalInstructions\)/);
     assert.match(gwasetukSource, /forceRandomFourActivities[\s\S]*selectedActivityEntries\.slice\(0, Math\.min\(4/);
     assert.match(clubSource, /shouldSelectRandomFourActivities\(additionalInstructions\)/);
-    assert.match(clubSource, /forceRandomFourActivities[\s\S]*shuffleArray\(validActivities\)\.slice\(0, Math\.min\(4/);
+    assert.match(clubSource, /forceRandomFourActivities[\s\S]*shuffleArray\(validActivityEntries\)\.slice\(0, Math\.min\(4/);
+});
+
+test("subject and club pages merge numbered individual details before prompt rendering", () => {
+    const gwasetukSource = readFileSync(new URL("../app/gwasetuk/page.js", import.meta.url), "utf8");
+    const clubSource = readFileSync(new URL("../app/club/page.js", import.meta.url), "utf8");
+
+    assert.match(gwasetukSource, /mergeNumberedIndividualActivities\(mappedActivityEntries, individualActivity\)/);
+    assert.match(gwasetukSource, /remainingIndividualActivity\.trim\(\)/);
+    assert.match(clubSource, /mergeNumberedIndividualActivities\(mappedActivityEntries, individualActivity\)/);
+    assert.match(clubSource, /remainingIndividualActivity\.trim\(\)/);
 });
 
 test("pages tell the model to start with selected activity one before individual context", () => {

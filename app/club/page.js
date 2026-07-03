@@ -14,7 +14,7 @@ import { generateWithSilentValidation } from "../../utils/generationHarness";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { fetchSearchContext } from "../../utils/searchContextFetch";
 import { getClubHighSchoolQualityGuidance } from "../../utils/recordQualityGuidance";
-import { limitActivitiesByTargetChars, shouldSelectRandomFourActivities } from "../../utils/activitySelection";
+import { limitActivitiesByTargetChars, mergeNumberedIndividualActivities, shouldSelectRandomFourActivities } from "../../utils/activitySelection";
 
 export default function ClubPage() {
     // State
@@ -279,17 +279,37 @@ export default function ClubPage() {
         // 동아리명은 시스템 참고용으로만 전달 (출력에 절대 포함 금지)
         const clubContext = clubName ? `[시스템 참고 - 출력에 절대 포함 금지] 동아리: ${clubName}` : "";
 
-        const totalActivities = selectedActivities.length;
-        const activitiesText = selectedActivities.map((a, i) => `- 활동${i + 1}: ${a}`).join("\n");
+        const mappedActivityEntries = selectedActivities.map((activity, index) => {
+            if (typeof activity === "string") {
+                return {
+                    text: activity.trim(),
+                    originalIndex: index,
+                };
+            }
+            return {
+                text: String(activity.text || "").trim(),
+                originalIndex: Number.isInteger(activity.originalIndex) ? activity.originalIndex : index,
+            };
+        }).filter(entry => entry.text);
+        const {
+            activities: selectedActivityEntries,
+            remainingIndividualActivity,
+        } = mergeNumberedIndividualActivities(mappedActivityEntries, individualActivity);
+
+        const totalActivities = selectedActivityEntries.length;
+        const activitiesText = selectedActivityEntries.map((entry, i) => {
+            const originalIndexText = entry.originalIndex !== i ? ` (원래 활동${entry.originalIndex + 1})` : "";
+            return `- 활동${i + 1}${originalIndexText}: ${entry.text}`;
+        }).join("\n");
 
         // 활동별 글자수 할당량 계산 (경량 모델용)
         const charsPerActivity = totalActivities > 0 ? Math.floor(targetChars / totalActivities) : targetChars;
-        const activityAllocation = selectedActivities.map((a, i) =>
-            `활동${i + 1}("${a.substring(0, 15)}${a.length > 15 ? '...' : ''}"): 약 ${charsPerActivity}자`
+        const activityAllocation = selectedActivityEntries.map((entry, i) =>
+            `활동${i + 1}("${entry.text.substring(0, 15)}${entry.text.length > 15 ? '...' : ''}"): 약 ${charsPerActivity}자`
         ).join(", ");
 
-        const individualActivityText = individualActivity.trim()
-            ? `\n\n[이 학생의 개별 활동 내용]\n${individualActivity}\n(위 개별 활동 내용은 반드시 최종 본문에 반영해야 하는 학생별 수행 내용입니다. 활동 내용 목록의 순서를 유지하고, 개별 활동 내용을 첫 문장이나 첫 활동처럼 우선 배치하지 않음. 개별 활동의 핵심어와 구체적 수행 내용을 누락하지 않음. 공통 활동 흐름 안에서 필요한 곳에 자연스럽게 통합해 주세요.)`
+        const individualActivityText = remainingIndividualActivity.trim()
+            ? `\n\n[이 학생의 개별 활동 내용]\n${remainingIndividualActivity}\n(위 개별 활동 내용은 반드시 최종 본문에 반영해야 하는 학생별 수행 내용입니다. 활동 내용 목록의 순서를 유지하고, 개별 활동 내용을 첫 문장이나 첫 활동처럼 우선 배치하지 않음. 개별 활동의 핵심어와 구체적 수행 내용을 누락하지 않음. 공통 활동 흐름 안에서 필요한 곳에 자연스럽게 통합해 주세요.)`
             : "";
         const searchContextText = searchContext.trim()
             ? `\n\n[학생 개별 활동 내용 기반 웹 검색 보강 자료]\n${searchContext}\n(위 검색 보강 자료는 개별 활동을 정확히 이해하기 위한 배경 자료입니다. 학생이 실제로 입력한 활동과 공통 활동 내용을 우선하고, 검색 자료는 관련 개념·활동 맥락·쟁점 이해를 보강하는 데에만 사용하세요.)`
@@ -396,8 +416,14 @@ ${lengthInstruction}
     };
 
     const generateForStudent = async (student) => {
-        const validActivities = activities.filter(a => a.trim() !== "");
-        if (validActivities.length === 0 && !student.individualActivity?.trim()) {
+        const validActivityEntries = activities
+            .map((activity, originalIndex) => ({
+                text: activity.trim(),
+                originalIndex,
+            }))
+            .filter(entry => entry.text !== "");
+        const validActivities = validActivityEntries.map(entry => entry.text);
+        if (validActivityEntries.length === 0 && !student.individualActivity?.trim()) {
             alert("활동 내용을 입력해주세요.");
             return;
         }
@@ -406,30 +432,30 @@ ${lengthInstruction}
         const targetChars = normalizeTargetChars(textLength, manualLength);
         const minTargetBytes = getMinimumTargetBytes(targetBytes);
 
-        let selectedActivities = [...validActivities];
+        let selectedActivityEntries = [...validActivityEntries];
         const forceRandomFourActivities = shouldSelectRandomFourActivities(additionalInstructions);
 
         // 동아리세특: 조건부 랜덤 셔플
         if (forceRandomFourActivities) {
-            selectedActivities = shuffleArray(validActivities).slice(0, Math.min(4, validActivities.length));
-        } else if (student.individualActivity?.trim() && validActivities.length > 0) {
+            selectedActivityEntries = shuffleArray(validActivityEntries).slice(0, Math.min(4, validActivityEntries.length));
+        } else if (student.individualActivity?.trim() && validActivityEntries.length > 0) {
             // 개별 활동이 있으면 관련성 높은 활동 우선 + 나머지 랜덤
-            selectedActivities = [...validActivities].sort((a, b) => {
-                const scoreA = calculateRelevanceScore(a, student.individualActivity);
-                const scoreB = calculateRelevanceScore(b, student.individualActivity);
+            selectedActivityEntries = [...validActivityEntries].sort((a, b) => {
+                const scoreA = calculateRelevanceScore(a.text, student.individualActivity);
+                const scoreB = calculateRelevanceScore(b.text, student.individualActivity);
                 if (scoreB !== scoreA) return scoreB - scoreA;
                 return Math.random() - 0.5;
             });
         } else if (hasTimeOrder(validActivities)) {
             // 시간 순서 키워드가 있으면 순서 유지 (다양한 표현은 프롬프트로 유도)
-            // selectedActivities = 원래 순서 유지
+            // selectedActivityEntries = 원래 순서 유지
         } else {
             // 순서성 없으면 Fisher-Yates 셔플로 랜덤화
-            selectedActivities = shuffleArray(validActivities);
+            selectedActivityEntries = shuffleArray(validActivityEntries);
         }
 
         // Activity Selection Logic based on Target Chars
-        selectedActivities = limitActivitiesByTargetChars(selectedActivities, targetChars);
+        selectedActivityEntries = limitActivitiesByTargetChars(selectedActivityEntries, targetChars);
         // 350자 초과: 모든 활동 사용
 
         try {
@@ -441,7 +467,7 @@ ${lengthInstruction}
                     updateStudent(student.id, "progress", "웹 검색 보강 중...");
                     const searchResult = await fetchSearchContext({
                         subjectName: clubName,
-                        commonActivities: selectedActivities,
+                        commonActivities: selectedActivityEntries.map(entry => entry.text),
                         individualActivity: student.individualActivity,
                     });
                     searchContext = searchResult.context || "";
@@ -456,7 +482,7 @@ ${lengthInstruction}
             const promptModel = isNvidiaSelected ? selectedModel : appliedOpenAIKey ? `openai:${selectedOpenAIModel}` : selectedModel;
             const prompt = generatePrompt(
                 student,
-                selectedActivities,
+                selectedActivityEntries,
                 targetChars,
                 student.individualActivity || "",
                 promptModel,
