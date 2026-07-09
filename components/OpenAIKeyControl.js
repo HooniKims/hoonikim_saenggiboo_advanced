@@ -14,6 +14,27 @@ export default function OpenAIKeyControl({
 }) {
     return (
         <div className="flex flex-col gap-3">
+            <div
+                style={{
+                    padding: "10px 12px",
+                    border: "1px solid #bfdbfe",
+                    borderRadius: "8px",
+                    backgroundColor: "#eff6ff",
+                    fontSize: "0.8rem",
+                    color: "#1e40af",
+                    lineHeight: 1.6,
+                    wordBreak: "keep-all",
+                    overflowWrap: "break-word",
+                }}
+            >
+                <span style={{ display: "block" }}>
+                    로컬AI 모델은 사용자가 몰리는 시간에는 생성이 느려지거나 오류가 발생할 수 있습니다.
+                </span>
+                <span style={{ display: "block" }}>
+                    OpenAI API Key를 발급받아 적용하면 기다림 없이 쾌적하게 이용할 수 있습니다.
+                </span>
+            </div>
+
             <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">OpenAI 모델</label>
                 <select

@@ -542,7 +542,7 @@ ${lengthInstruction}
                         </label>
 
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label className="form-label">AI 모델</label>
+                            <label className="form-label">로컬AI 모델</label>
                             <select
                                 value={selectedModel}
                                 onChange={(e) => setSelectedModel(e.target.value)}
