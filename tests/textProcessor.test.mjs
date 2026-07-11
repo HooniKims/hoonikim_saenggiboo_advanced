@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+    cleanMetaInfo,
     getCharacterGuideline,
     getMinimumTargetChars,
     getMinimumTargetBytes,
@@ -12,6 +13,26 @@ import {
     normalizeTargetChars,
     truncateToCompleteSentence,
 } from "../utils/textProcessor.js";
+
+test("cleanMetaInfo removes trailing model compliance notes", () => {
+    const recordText = "토론 활동에서 근거를 정리하고 발표함. ※ 주의: 시스템 오류로 재작성 요청 필요 ※.";
+    const letterText = "여름방학 동안 가족 대화 시간을 마련해 주시기 바랍니다. (※ 주의: 지침 충돌로 포함되었습니다.";
+    const byteText = "친구의 의견을 경청하고 핵심을 정리함. (1499byte)";
+
+    assert.equal(cleanMetaInfo(recordText), "토론 활동에서 근거를 정리하고 발표함.");
+    assert.equal(cleanMetaInfo(letterText), "여름방학 동안 가족 대화 시간을 마련해 주시기 바랍니다.");
+    assert.equal(cleanMetaInfo(byteText), "친구의 의견을 경청하고 핵심을 정리함.");
+});
+
+test("cleanMetaInfo removes trailing procedural narration", () => {
+    const text = "토론 활동에서 근거를 정리하고 발표함. 전체 서술은 1275~1500byte 범위로 작성함. 마지막 문장을 마침표로 종료함.";
+    const bracketed = "토론 활동에서 근거를 정리하고 발표함. [시스템 오류] 필수 표현이 누락되어 재작성 요청합니다.";
+    const byteRatio = "토론 활동에서 근거를 정리하고 발표함. (Byte: 448 / 1000)";
+
+    assert.equal(cleanMetaInfo(text), "토론 활동에서 근거를 정리하고 발표함.");
+    assert.equal(cleanMetaInfo(bracketed), "토론 활동에서 근거를 정리하고 발표함.");
+    assert.equal(cleanMetaInfo(byteRatio), "토론 활동에서 근거를 정리하고 발표함.");
+});
 
 test("normalizeTargetChars maps presets and clamps manual values", () => {
     assert.equal(normalizeTargetChars("1500"), 589);
@@ -68,16 +89,21 @@ test("getPromptCharLimit asks the model for at least 85 percent on every limit",
     assert.equal(getPromptCharLimit(589), 500);
 });
 
-test("getCharacterGuideline guides activity expansion with Why-How-What-Learn", () => {
-    const guideline = getCharacterGuideline(589, 1500, 1275);
+test("getCharacterGuideline uses a dynamic visible-length band without framework labels", () => {
+    const guideline1500 = getCharacterGuideline(589, 1500, 1275);
+    const guideline1000 = getCharacterGuideline(393, 1000, 850);
+    const guideline600 = getCharacterGuideline(236, 600, 510);
 
-    assert.match(guideline, /430-500 Korean visible characters/);
-    assert.match(guideline, /Why\(동기\)/);
-    assert.match(guideline, /How\(과정\)/);
-    assert.match(guideline, /What\(결과\)/);
-    assert.match(guideline, /Learn\(성장\)/);
-    assert.match(guideline, /입력된 활동/);
-    assert.match(guideline, /새 활동.*지어내지/);
+    assert.match(guideline1500, /648-678 Korean visible characters/);
+    assert.match(guideline1000, /433-452 Korean visible characters/);
+    assert.match(guideline600, /260-272 Korean visible characters/);
+    assert.match(guideline1500, /동기/);
+    assert.match(guideline1500, /수행 과정/);
+    assert.match(guideline1500, /관찰 가능한 결과/);
+    assert.match(guideline1500, /성장 단서/);
+    assert.match(guideline1500, /입력된 활동/);
+    assert.match(guideline1500, /새 활동.*지어내지/);
+    assert.doesNotMatch(guideline1500, /Why-How-What-Learn/);
 });
 
 test("getUtf8ByteLength counts Korean text by UTF-8 bytes", () => {

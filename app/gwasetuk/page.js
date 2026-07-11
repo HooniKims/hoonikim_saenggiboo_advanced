@@ -5,9 +5,10 @@ import { Plus, Trash2, Upload, Download, Wand2, FileSpreadsheet, Users, UserX, C
 import * as XLSX from "xlsx";
 import { writeExcel } from "../../utils/excel";
 import { getCharacterGuideline, getMinimumTargetBytes, getUtf8ByteLength, normalizeTargetBytes, normalizeTargetChars } from "../../utils/textProcessor";
-import { fetchStream, AVAILABLE_MODELS, DEFAULT_MODEL, getModelOptionLabel, isLightweightModel, isNvidiaModel } from "../../utils/streamFetch";
+import { fetchStream, AVAILABLE_MODELS, DEFAULT_MODEL, getModelOptionLabel, isLightweightModel, isNvidiaModel, isUpstageModel } from "../../utils/streamFetch";
 import { fetchNvidiaCompletion } from "../../utils/nvidiaFetch";
 import { fetchOpenAICompletion } from "../../utils/openAIFetch";
+import { fetchUpstageCompletion } from "../../utils/upstageFetch";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import { generateWithSilentValidation } from "../../utils/generationHarness";
@@ -16,6 +17,29 @@ import { fetchSearchContext } from "../../utils/searchContextFetch";
 import { limitActivitiesByTargetChars, mergeNumberedIndividualActivities, shouldSelectRandomFourActivities } from "../../utils/activitySelection";
 
 const GRADE_OPTIONS = ["A", "B", "C", "D", "E"];
+const SOLAR_GRADE_EVIDENCE = {
+    A: ["주도", "심화", "높은 수준", "새로운 관점", "돋보"],
+    B: ["안정적", "충실", "핵심 내용을 이해", "결과를 완성", "잘 해냄"],
+    C: ["보완이 필요", "보완할 필요", "연습이 요구", "도달하지 못", "이해의 제한"],
+    D: ["반복적인 안내", "많은 보완", "지속적인 교사 지원", "다시 확인"],
+    E: ["기본 요건", "개별 지도", "기초 학습 지원", "매우 많은 보완"],
+};
+const SOLAR_GRADE_EXPANSION = {
+    A: () => "주도적 심화 탐구로 새로운 관점을 제시함.",
+    B: (anchor) => `${anchor} 수행의 핵심 내용을 이해하고 맡은 역할을 충실히 완성함.`,
+    C: (anchor) => `${anchor} 수행 과정의 기초 이해와 결과 표현을 단계적으로 보완할 필요가 있음.`,
+    D: (anchor) => `${anchor} 해석에서 반복 안내와 교사 지원을 통한 지속적인 보완이 필요함.`,
+    E: (anchor) => `${anchor} 기본 요건 충족을 위해 개별 지도와 기초 학습 지원이 필요함.`,
+};
+
+const getActivityEvidenceTerms = (text) => {
+    const firstClause = String(text || "").trim().replace(/\s+/g, " ").split(/[,.!?]/)[0];
+    const words = firstClause.split(" ").filter(Boolean);
+    return [...new Set([
+        words.slice(0, 2).join(" "),
+        words.slice(0, 3).join(" "),
+    ].filter((term) => term.length >= 2))];
+};
 
 const normalizeActivityGrades = (grades = [], activityCount = 1, fallbackGrade = "A") => {
     const safeCount = Math.max(1, activityCount);
@@ -82,8 +106,10 @@ export default function GwasetukPage() {
         setSelectedOpenAIModel,
     } = useOpenAIKey();
     const isNvidiaSelected = isNvidiaModel(selectedModel);
+    const isUpstageSelected = isUpstageModel(selectedModel);
     const generationStatusText = isNvidiaSelected
         ? "NVIDIA NIM 모델로 생성 중..."
+        : isUpstageSelected ? "Upstage Solar Pro 2로 생성 중..."
         : appliedOpenAIKey ? "OpenAI API key를 사용하여 생성 중..." : "생성 중...";
 
     useEffect(() => {
@@ -338,13 +364,15 @@ export default function GwasetukPage() {
 
         const totalActivities = selectedActivityEntries.length;
         const activitiesText = selectedActivityEntries.map((entry, i) => {
-            const gradeText = useActivityGrades ? ` [${entry.grade}]` : "";
             const originalIndexText = entry.originalIndex !== i ? ` (원래 활동${entry.originalIndex + 1})` : "";
-            return `- 활동${i + 1}${gradeText}${originalIndexText}: ${entry.text}`;
+            return `- 활동${i + 1}${originalIndexText}: ${entry.text}`;
         }).join("\n");
 
         const activityGradeInstruction = useActivityGrades
             ? `\n[활동별 A/B/C/D/E 반영 기준]\n${selectedActivityEntries.map((entry, i) => `- 활동${i + 1}: ${entry.grade} - ${gradeDescriptions[entry.grade]}`).join("\n")}
+
+[출력 금지]
+- 등급 기호와 라벨은 내부 반영 기준일 뿐이며 [A], (A), A등급, 활동1[A] 같은 표기를 본문에 절대 출력하지 않음
 
 [등급별 표현 사전]
 - A 전용 권장 표현: 주도적으로 탐구함, 심화 질문을 제기함, 근거를 종합해 설명함, 새로운 관점으로 연결함, 구체적 성과를 보임, 높은 수준의 이해를 드러냄
@@ -365,7 +393,7 @@ export default function GwasetukPage() {
 - D와 E 활동을 C 수준으로 완화하지 않음
 - C/D/E 활동은 단계적으로 더 부정적인 수행 제한을 담되, 비난하거나 낙인찍는 표현은 사용하지 않음
 
-(각 활동은 해당 줄의 A/B/C/D/E 기준에 맞춰 깊이와 구체성을 조절하고, 다른 활동의 등급 기준을 섞어 적용하지 마세요. B 활동은 A 수준의 최상위 표현으로 과장하지 말고, C 활동은 B 수준의 안정적 수행으로 올려 쓰지 마세요. D와 E는 C 수준으로 완화하지 마세요. C/D/E 활동은 단계적으로 수행 제한과 보완 필요성을 더 강하게 드러내되 비난하거나 낙인찍는 표현은 사용하지 마세요. 선택한 A/B/C/D/E 등급 문구를 그대로 반복하지 말고 수행 깊이, 자율성, 구체성의 차이로 표현하세요.)`
+(각 활동은 해당 줄의 A/B/C/D/E 기준에 맞춰 깊이와 구체성을 조절하고, 다른 활동의 등급 기준을 섞어 적용하지 마세요. B 활동은 A 수준의 최상위 표현으로 과장하지 말고, C 활동은 B 수준의 안정적 수행으로 올려 쓰지 마세요. D와 E는 C 수준으로 완화하지 마세요. C/D/E 활동은 단계적으로 수행 제한과 보완 필요성을 더 강하게 드러내되 비난하거나 낙인찍는 표현은 사용하지 마세요. 선택한 A/B/C/D/E 등급 문구를 그대로 반복하지 말고 수행 깊이, 자율성, 구체성의 차이로 표현하세요. 등급 기호와 라벨은 내부 반영 기준일 뿐 본문에 절대 출력하지 마세요.)`
             : "";
         const promptBasis = useActivityGrades ? "활동 내용과 활동별 A/B/C/D/E 기준" : "활동 내용";
 
@@ -383,6 +411,10 @@ export default function GwasetukPage() {
             : "";
 
         const isLightweight_ = isLightweightModel(model || selectedModel);
+        const isUpstage_ = isUpstageModel(model || selectedModel);
+        const solarActivityPlan = isUpstage_
+            ? `\n<Solar 다중 활동 작성 순서>\n1. 활동1부터 활동${totalActivities}까지 각각 최소 한 문장씩 입력 순서대로 먼저 작성함.\n2. 각 활동 문장 안에 해당 활동의 핵심 수행과 지정된 성취 수준을 함께 표현함.\n3. 활동별 분량을 ${activityAllocation} 기준으로 균등하게 배분하고 어느 활동도 생략하지 않음.\n4. 모든 활동을 반영한 뒤에만 남은 분량으로 관찰 관점을 추가함.\n5. A/B/C/D/E 문자와 '성취 수준' 같은 내부 라벨은 절대 출력하지 않음.\n`
+            : "";
 
         if (isLightweight_) {
             // 경량 모델용: 간결하고 명확한 프롬프트
@@ -394,6 +426,7 @@ ${subjectContext}
 [활동 내용 - 총 ${totalActivities}개, 모두 반영 필수]
 ${activitiesText}${individualActivityText}${searchContextText}
 ${activityGradeInstruction}
+${solarActivityPlan}
 
 [활동별 할당량] ${activityAllocation}
 
@@ -403,12 +436,13 @@ ${activityGradeInstruction}
 ❌ 주어 금지 ("학생은", "이 학생은" 금지)
 ❌ 요약/마무리 문장 금지
 ❌ '마지막으로', '끝으로', '마무리하며', '덧붙여', '추가로' 사용 금지
+❌ 등급 기호/라벨 출력 금지 ([A], (A), A등급, 활동1[A] 등 전부 금지)
 
 [필수]
 ✅ 현재형 종결어미만 사용: ~함, ~임, ~음, ~보임, ~드러남
 ✅ 위 ${totalActivities}개 활동을 모두 다양한 표현으로 서술
 ✅ 첫 문장은 반드시 위 [활동 내용]의 활동1 공통 활동으로 시작하고, 개별 활동 내용이나 검색 보강 자료를 첫 활동처럼 앞세우지 않음
-✅ 활동별 A/B/C/D/E 기준이 있으면 활동마다 수행 깊이와 표현 강도를 다르게 반영
+✅ 활동별 A/B/C/D/E 기준이 있으면 활동마다 수행 깊이와 표현 강도를 다르게 반영하되 등급 표기는 출력하지 않음
 ✅ 문학작품은 반드시 작품명(작가명) 형식으로만 표기: 소나기(황순원), 운수좋은 날(현진건)
 ✅ 줄바꿈 없이 하나의 문단
 ✅ 오직 본문만 출력
@@ -431,6 +465,7 @@ ${subjectContext}
 <활동 내용 - 총 ${totalActivities}개, 반드시 모두 반영>
 ${activitiesText}${individualActivityText}${searchContextText}
 ${activityGradeInstruction}
+${solarActivityPlan}
 
 <작성 규칙>
 1. '학생은', '이 학생은' 등 주어를 사용하지 않고, 활동 내용부터 바로 서술
@@ -444,6 +479,7 @@ ${activityGradeInstruction}
 9. '이러한', '이를 통해', '이와 같이', '앞으로', '향후', '결과적으로', '종합적으로', '마지막으로', '끝으로', '마무리하며', '덧붙여', '추가로'로 시작하는 요약/정리/마무리 문장 대신, 활동의 세부 과정이나 탐구 내용을 추가 서술
 10. 문학작품을 언급할 때는 반드시 작품명(작가명) 형식으로만 표기함. 예: 소나기(황순원), 운수좋은 날(현진건). '황순원의 소나기', '현진건의 운수좋은 날'처럼 쓰지 않음
 11. 활동별 A/B/C/D/E 기준이 있으면 A는 최고 수준의 심화·주도성, B는 안정적 수행·핵심 이해, C는 부분 보완, D는 반복적인 안내와 많은 보완, E는 활동 수행의 기본 요건 충족 어려움과 지속적인 지원 필요 중심으로 표현 강도를 구분함
+12. 등급 기호와 라벨은 내부 반영 기준일 뿐이며 [A], (A), A등급, 활동1[A] 같은 표기를 본문에 절대 출력하지 않음
 
 ${lengthInstruction}
 
@@ -482,6 +518,9 @@ ${lengthInstruction}
 
         const targetBytes = normalizeTargetBytes(textLength, manualLength);
         const targetChars = normalizeTargetChars(textLength, manualLength);
+        const generationTargetChars = isUpstageSelected
+            ? Math.min(650, Math.max(targetChars, Math.ceil(targetBytes / 2.7)))
+            : targetChars;
         const minTargetBytes = getMinimumTargetBytes(targetBytes);
 
         // 개인별 활동 내용이 있어도 공통 활동 순서는 항상 Fisher-Yates 셔플로 랜덤화
@@ -494,6 +533,18 @@ ${lengthInstruction}
         // Activity Selection Logic based on Target Chars
         selectedActivityEntries = limitActivitiesByTargetChars(selectedActivityEntries, targetChars);
         // 350자 초과: 모든 활동 사용
+        const solarRequiredContentGroups = isUpstageSelected
+            ? [
+                ...selectedActivityEntries.map((entry, index) => ({
+                    label: `활동${index + 1}`,
+                    terms: getActivityEvidenceTerms(entry.text),
+                })),
+                ...[...new Set(selectedActivityEntries.map((entry) => entry.grade))].map((grade) => ({
+                    label: `${grade} 성취 표현`,
+                    terms: SOLAR_GRADE_EVIDENCE[grade],
+                })),
+            ]
+            : [];
 
         try {
             updateStudent(student.id, "status", "loading");
@@ -516,33 +567,74 @@ ${lengthInstruction}
                 }
             }
 
-            const promptModel = isNvidiaSelected ? selectedModel : appliedOpenAIKey ? `openai:${selectedOpenAIModel}` : selectedModel;
+            const promptModel = isNvidiaSelected || isUpstageSelected ? selectedModel : appliedOpenAIKey ? `openai:${selectedOpenAIModel}` : selectedModel;
             const prompt = generatePrompt(
                 student,
                 selectedActivityEntries,
-                targetChars,
+                generationTargetChars,
                 student.individualActivity || "",
                 promptModel,
                 searchContext
             );
+            const expandSolarPreviousText = (previousText) => {
+                let expandedText = previousText.trim();
+                for (let round = 0; round < 2; round += 1) {
+                    for (const entry of selectedActivityEntries) {
+                        const anchor = getActivityEvidenceTerms(entry.text)[0] || "입력 활동";
+                        const addition = SOLAR_GRADE_EXPANSION[entry.grade](anchor);
+                        const candidate = `${expandedText} ${addition}`.trim();
+                        if (candidate.length <= generationTargetChars && getUtf8ByteLength(candidate) <= targetBytes) {
+                            expandedText = candidate;
+                        }
+                        if (getUtf8ByteLength(expandedText) >= minTargetBytes) return expandedText;
+                    }
+                }
+                return expandedText;
+            };
+            const restoreMissingSolarActivities = (previousText, issues) => {
+                let restoredText = previousText.trim();
+                const missingIndexes = (issues || [])
+                    .filter((issue) => issue.code === "missing_required_content")
+                    .map((issue) => Number(issue.detail.match(/^활동(\d+)/)?.[1]) - 1)
+                    .filter((index) => Number.isInteger(index) && selectedActivityEntries[index]);
+                for (const index of missingIndexes) {
+                    const activityText = selectedActivityEntries[index].text.trim().replace(/[.!?]*$/, ".");
+                    const candidate = `${restoredText} ${activityText}`.trim();
+                    if (candidate.length <= generationTargetChars && getUtf8ByteLength(candidate) <= targetBytes) {
+                        restoredText = candidate;
+                    }
+                }
+                return restoredText;
+            };
             const generationResult = await generateWithSilentValidation({
                 prompt,
+                acceptLengthOnlyResult: !isUpstageSelected,
+                preserveTextOnLengthRepair: isUpstageSelected,
+                stripExpandedGradeLabels: isUpstageSelected,
+                requiredContentGroups: solarRequiredContentGroups,
                 maxTargetBytes: targetBytes,
                 minTargetBytes,
-                targetChars,
+                targetChars: generationTargetChars,
                 mode: "record",
                 forbiddenTerms: [subjectName, student.name],
-                maxRepairAttempts: 1,
-                generateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
+                maxRepairAttempts: isUpstageSelected ? 4 : 2,
+                generateOnce: (nextPrompt, { attempt, previousText, previousValidation }) => runGenerationWithProgress({
                     attempt,
                     previousValidation,
-                    provider: getGenerationProvider({ isNvidiaSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
+                    provider: getGenerationProvider({ isNvidiaSelected, isUpstageSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
                     setProgress: (message) => updateStudent(student.id, "progress", message),
                     run: () => isNvidiaSelected
-                        ? fetchNvidiaCompletion({ prompt: nextPrompt, additionalInstructions, targetChars, model: selectedModel })
+                        ? fetchNvidiaCompletion({ prompt: nextPrompt, additionalInstructions, targetChars: generationTargetChars, model: selectedModel })
+                        : isUpstageSelected
+                            ? attempt > 0
+                                && previousText
+                                ? previousValidation?.issues.some((issue) => issue.code === "missing_required_content" && issue.detail.startsWith("활동"))
+                                    ? Promise.resolve(restoreMissingSolarActivities(previousText, previousValidation.issues))
+                                    : Promise.resolve(expandSolarPreviousText(previousText))
+                                : fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars: generationTargetChars })
                         : appliedOpenAIKey
-                            ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions, apiKey: appliedOpenAIKey, targetChars, model: selectedOpenAIModel })
-                            : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars }),
+                            ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions, apiKey: appliedOpenAIKey, targetChars: generationTargetChars, model: selectedOpenAIModel })
+                            : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars: generationTargetChars }),
                 }),
             });
 
@@ -890,7 +982,7 @@ ${lengthInstruction}
 
                         <div className="flex flex-col gap-3">
                             <div className="form-group" style={{ marginBottom: 0 }}>
-                                <label className="form-label">로컬AI 모델</label>
+                                <label className="form-label">AI 모델</label>
                                 <select
                                     value={selectedModel}
                                     onChange={(e) => setSelectedModel(e.target.value)}
@@ -911,6 +1003,7 @@ ${lengthInstruction}
                                 maskedOpenAIKey={maskedOpenAIKey}
                                 selectedOpenAIModel={selectedOpenAIModel}
                                 setSelectedOpenAIModel={setSelectedOpenAIModel}
+                                usesUpstageModel={isUpstageSelected}
                             />
                         </div>
                     </div>

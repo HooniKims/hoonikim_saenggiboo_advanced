@@ -45,6 +45,89 @@ test("letter page keeps home-letter search augmentation flow", () => {
     assert.match(source, /searchContextText/);
 });
 
+test("letter prompt and system message ban direct 해보세요-style advice", () => {
+    const source = readPage("app/letter/page.js");
+    const streamSource = readPage("utils/streamFetch.js");
+
+    assert.match(source, /해보세요/);
+    assert.match(source, /보세요/);
+    assert.match(source, /하세요/);
+    assert.match(source, /바랍니다/);
+    assert.match(streamSource, /해보세요/);
+    assert.match(streamSource, /보세요/);
+    assert.match(streamSource, /바랍니다/);
+    assert.doesNotMatch(source, /가져 보시기 바랍니다/);
+});
+
+test("all generation pages require Upstage to repair short output before length-only fallback", () => {
+    for (const relativePath of [
+        "app/gwasetuk/page.js",
+        "app/club/page.js",
+        "app/behavior/page.js",
+        "app/letter/page.js",
+    ]) {
+        const source = readPage(relativePath);
+        assert.match(source, /generateWithSilentValidation\(\{[\s\S]*?acceptLengthOnlyResult:\s*!isUpstageSelected/);
+        assert.match(source, /preserveTextOnLengthRepair:\s*isUpstageSelected/);
+        assert.match(source, /stripExpandedGradeLabels:\s*isUpstageSelected/);
+        if (relativePath === "app/gwasetuk/page.js") {
+            assert.match(source, /requiredContentGroups:\s*solarRequiredContentGroups/);
+            assert.match(source, /SOLAR_GRADE_EVIDENCE/);
+        }
+    }
+});
+
+test("record generation pages give Solar extra repair attempts without changing other models", () => {
+    for (const relativePath of [
+        "app/gwasetuk/page.js",
+        "app/club/page.js",
+        "app/behavior/page.js",
+    ]) {
+        const source = readPage(relativePath);
+        assert.match(source, /generateWithSilentValidation\(\{[\s\S]*?maxRepairAttempts:\s*isUpstageSelected\s*\?\s*4\s*:\s*2/);
+    }
+});
+
+test("all generation pages route Solar Pro 2 through the Upstage API", () => {
+    for (const relativePath of [
+        "app/gwasetuk/page.js",
+        "app/club/page.js",
+        "app/behavior/page.js",
+        "app/letter/page.js",
+    ]) {
+        const source = readPage(relativePath);
+        assert.match(source, /isUpstageSelected/);
+        assert.match(source, /fetchUpstageCompletion/);
+        assert.match(source, /usesUpstageModel=\{isUpstageSelected\}/);
+        assert.match(source, /provider:\s*getGenerationProvider\(\{[\s\S]*?isUpstageSelected/);
+        assert.match(source, /isUpstageSelected[\s\S]*?fetchUpstageCompletion/);
+        assert.match(source, /<label className="form-label">AI 모델<\/label>/);
+    }
+});
+
+test("model guidance recommends Solar when the default local model is slow or errors", () => {
+    const source = readPage("components/OpenAIKeyControl.js");
+
+    assert.match(source, /생성이 느리거나 오류가 나는 경우에는 Solar 모델을 선택하고 생성해보세요!/);
+});
+
+test("gwasetuk gives Solar an activity-first equal-allocation plan", () => {
+    const source = readPage("app/gwasetuk/page.js");
+
+    assert.match(source, /<Solar 다중 활동 작성 순서>/);
+    assert.match(source, /활동1부터 활동\$\{totalActivities\}까지 각각 최소 한 문장씩/);
+    assert.match(source, /\$\{activityAllocation\} 기준으로 균등하게 배분/);
+    assert.match(source, /모든 활동을 반영한 뒤에만 남은 분량/);
+});
+
+test("gwasetuk repairs missing Solar content and uses a byte-realistic character ceiling", () => {
+    const source = readPage("app/gwasetuk/page.js");
+
+    assert.match(source, /expandSolarPreviousText/);
+    assert.match(source, /restoreMissingSolarActivities/);
+    assert.match(source, /Math\.ceil\(targetBytes \/ 2\.7\)/);
+});
+
 test("club prompt applies advanced content-quality guidance only for high school", () => {
     const source = readPage("app/club/page.js");
 

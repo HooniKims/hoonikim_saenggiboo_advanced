@@ -8,6 +8,7 @@
 const MAX_CHARS = 650;
 const MAX_BYTES = 1500;
 const AVG_KOREAN_BYTES_WITH_SPACES = 2.55;
+const PROMPT_KOREAN_BYTES_WITH_SPACES = 2.45;
 
 function clampTargetChars(targetChars) {
     const numeric = Number(targetChars);
@@ -64,6 +65,16 @@ export function getPromptCharLimit(userRequestedChars) {
     return Math.floor(targetChars * bufferRatio);
 }
 
+export function getByteTargetVisibleRange(targetChars, minTargetBytes = 0) {
+    const maxAllowed = clampTargetChars(targetChars);
+    const byteBasedMinimum = Number(minTargetBytes) > 0
+        ? Math.ceil(Number(minTargetBytes) / PROMPT_KOREAN_BYTES_WITH_SPACES)
+        : getPromptCharLimit(maxAllowed);
+    const min = Math.max(byteBasedMinimum, Math.ceil(maxAllowed * 1.1));
+    const max = Math.max(min, Math.ceil(maxAllowed * 1.15));
+    return { min, max };
+}
+
 export function getMinimumTargetChars(userRequestedChars) {
     const targetChars = clampTargetChars(userRequestedChars);
     return Math.floor(targetChars * 0.85);
@@ -84,12 +95,7 @@ export function getMaxTokensForTargetChars(targetChars) {
 }
 
 export function getExpansionFrameworkGuideline() {
-    return `<내용 확장 방식: Why-How-What-Learn>
-- Why(동기): 입력된 활동에서 드러난 관심, 문제의식, 참여 이유를 짧게 드러냄
-- How(과정): 조사, 토의, 발표, 제작, 실험, 피드백 반영 등 수행 과정을 구체화함
-- What(결과): 완성한 산출물, 발표 내용, 정리한 근거, 변화한 행동 등 관찰 가능한 결과를 서술함
-- Learn(성장): 태도, 사고력, 협업, 표현력, 자기주도성 등 성장 단서를 현재형으로 연결함
-- 새 활동, 새 작품, 새 수상, 새 기관, 새 실험 결과를 지어내지 않고 입력된 활동의 단서만 확장함`;
+    return `입력된 활동에서 이미 확인되는 동기와 수행 과정, 관찰 가능한 결과, 성장 단서를 제목이나 항목명 없이 자연스럽게 연결하되, 새 활동·작품·수상·기관·실험 결과를 지어내지 않음`;
 }
 
 /**
@@ -102,6 +108,7 @@ export function getCharacterGuideline(targetChars, targetBytes = 0, minTargetByt
     const maxAllowed = clampTargetChars(targetChars);
     const maxAllowedBytes = Number(targetBytes) > 0 ? Math.min(Math.floor(Number(targetBytes)), MAX_BYTES) : 0;
     const minAllowedBytes = Number(minTargetBytes) > 0 ? Math.floor(Number(minTargetBytes)) : 0;
+    const visibleRange = getByteTargetVisibleRange(maxAllowed, minAllowedBytes);
     const expansionFramework = getExpansionFrameworkGuideline();
 
     if (maxAllowedBytes > 0) {
@@ -109,7 +116,7 @@ export function getCharacterGuideline(targetChars, targetBytes = 0, minTargetByt
 <분량 제한>
 전체 byte: ${maxAllowedBytes}byte 이하 (초과 불가)
 목표 byte: ${minAllowedBytes || Math.floor(maxAllowedBytes * 0.85)}byte ~ ${maxAllowedBytes}byte
-Target visible length: write 430-500 Korean visible characters for the 1500byte setting.
+Target visible length: write ${visibleRange.min}-${visibleRange.max} Korean visible characters for the ${maxAllowedBytes}byte setting.
 작성 분량 참고: 한글 기준 약 ${promptLimit}자 안팎, 공백과 문장부호에 따라 달라질 수 있음
 
 작성 방법:
@@ -118,6 +125,7 @@ Target visible length: write 430-500 Korean visible characters for the 1500byte 
 3. 초과가 우려되면 마지막 문장 하나를 줄이되, 문장이 중간에 끊기지 않도록 작성
 4. 모든 문장은 완전한 종결어미와 마침표로 끝냄
 5. 줄바꿈 없이 하나의 문단으로 작성
+6. 문장이 끝나면 마침표(.)를 찍고 한 칸 띄우며, 마지막 문장은 마침표(.)로 끝내고 바로 종료함
 
 ${expansionFramework}
 `;
@@ -135,6 +143,7 @@ ${expansionFramework}
 3. "깊이 있게 읽음." 같은 내용 없는 짧은 문장은 사용하지 않음
 4. 모든 문장은 '~함.', '~음.', '~임.' 등 완전한 종결어미로 끝냄
 5. 최종 출력은 ${maxAllowed}자 이하, 완전한 문장으로 끝냄
+6. 문장이 끝나면 마침표(.)를 찍고 한 칸 띄우며, 마지막 문장은 마침표(.)로 끝내고 바로 종료함
 
 ${expansionFramework}
 `;
@@ -151,6 +160,7 @@ ${expansionFramework}
 4. 문장 예시: "환경 문제에 대한 조사 활동에서 미세먼지의 원인과 대책을 분석하고 발표 자료를 체계적으로 구성함."
 5. 모든 문장은 완전한 종결어미(~함, ~음, ~임)와 마침표로 끝냄
 6. 최종 출력은 ${maxAllowed}자 이하, 완전한 문장으로 끝냄
+7. 문장이 끝나면 마침표(.)를 찍고 한 칸 띄우며, 마지막 문장은 마침표(.)로 끝내고 바로 종료함
 
 ${expansionFramework}
 `;
@@ -166,6 +176,7 @@ ${expansionFramework}
 3. 각 문장에 구체적인 활동, 과정, 결과를 포함하여 의미 있게 서술
 4. 모든 문장은 완전한 종결어미로 끝냄. 마지막 문장이 중간에 끊기지 않도록 함
 5. 최종 출력은 ${maxAllowed}자 이하, 완전한 문장으로 끝냄
+6. 문장이 끝나면 마침표(.)를 찍고 한 칸 띄우며, 마지막 문장은 마침표(.)로 끝내고 바로 종료함
 
 ${expansionFramework}
 `;
@@ -180,8 +191,21 @@ ${expansionFramework}
 export function cleanMetaInfo(text) {
     if (!text) return text;
 
+    // 모델이 지침 충돌을 설명하며 덧붙이는 후행 주석은 본문이 아님.
+    let cleaned = text.replace(/\s*\(?\s*※[\s\S]*$/g, "");
+
+    // 모델이 본문 뒤에 붙인 분량·형식 준수 설명은 첫 메타 문장부터 제거한다.
+    cleaned = cleaned.replace(
+        /\s+(?:(?:[가-힣A-Za-z0-9]+\s*)?과목\s*세부능력\s*및\s*특기사항으로\s*기록된\s*내용|전체\s*서술(?:은|을)|최종\s*출력(?:은|을)|총\s*(?:byte|바이트)\s*수|활동별\s*과정과\s*결과|마지막\s*문장(?:은|을)|출력\s*금지\s*(?:기호|용어)|모든\s*내용은\s*입력)[\s\S]*$/i,
+        "",
+    );
+    cleaned = cleaned.replace(
+        /\s+\[(?:시스템\s*오류|재작성\s*요청|최종\s*출력|검증(?:\s*결과)?)\][\s\S]*$/i,
+        "",
+    );
+
     // 괄호 안의 메타 정보 제거: (자세한 내용 포함, 330자), (약 490자), (글자수: 330) 등
-    let cleaned = text.replace(/\s*\([^)]*\d+자[^)]*\)/g, '');
+    cleaned = cleaned.replace(/\s*\([^)]*\d+자[^)]*\)/g, '');
     cleaned = cleaned.replace(/\s*\([^)]*글자[^)]*\)/g, '');
     cleaned = cleaned.replace(/\s*\([^)]*자세한[^)]*\)/g, '');
     cleaned = cleaned.replace(/\s*\([^)]*내용\s*포함[^)]*\)/g, '');
@@ -194,6 +218,9 @@ export function cleanMetaInfo(text) {
     // 분석/검증 관련 문구 제거
     cleaned = cleaned.replace(/\s*\[분석[^\]]*\]/g, '');
     cleaned = cleaned.replace(/\s*\[검증[^\]]*\]/g, '');
+    cleaned = cleaned.replace(/\s*\(?\s*\d+\s*(?:byte|바이트)\s*\)?\.?\s*$/gi, '');
+    cleaned = cleaned.replace(/\s*\(?\s*(?:byte|바이트)\s*[:：]\s*\d+\s*\)?\.?\s*$/gi, '');
+    cleaned = cleaned.replace(/\s*\(\s*(?:byte|바이트)\s*[:：][^)]*\)\s*$/gi, '');
 
     return cleaned.trim();
 }

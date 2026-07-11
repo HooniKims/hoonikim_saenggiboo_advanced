@@ -11,6 +11,7 @@ export default function OpenAIKeyControl({
     maskedOpenAIKey,
     selectedOpenAIModel,
     setSelectedOpenAIModel,
+    usesUpstageModel = false,
 }) {
     return (
         <div className="flex flex-col gap-3">
@@ -27,12 +28,25 @@ export default function OpenAIKeyControl({
                     overflowWrap: "break-word",
                 }}
             >
-                <span style={{ display: "block" }}>
-                    로컬AI 모델은 사용자가 몰리는 시간에는 생성이 느려지거나 오류가 발생할 수 있습니다.
-                </span>
-                <span style={{ display: "block" }}>
-                    OpenAI API Key를 발급받아 적용하면 기다림 없이 쾌적하게 이용할 수 있습니다.
-                </span>
+                {usesUpstageModel ? (
+                    <>
+                        <span style={{ display: "block" }}>
+                            Upstage Solar Pro 2는 서버에 설정된 API 키를 사용합니다.
+                        </span>
+                        <span style={{ display: "block" }}>
+                            별도의 OpenAI API Key 없이 바로 생성할 수 있습니다.
+                        </span>
+                    </>
+                ) : (
+                    <>
+                        <span style={{ display: "block" }}>
+                            로컬AI 모델은 사용자가 몰리는 시간에는 생성이 느려지거나 오류가 발생할 수 있습니다.
+                        </span>
+                        <span style={{ display: "block" }}>
+                            생성이 느리거나 오류가 나는 경우에는 Solar 모델을 선택하고 생성해보세요!
+                        </span>
+                    </>
+                )}
             </div>
 
             <div className="form-group" style={{ marginBottom: 0 }}>
@@ -83,7 +97,9 @@ export default function OpenAIKeyControl({
                     )}
                 </div>
                 <p style={{ fontSize: "0.78rem", color: isOpenAIKeyApplied ? "#2563eb" : "#6b7280", marginTop: "6px" }}>
-                    {isOpenAIKeyApplied
+                    {usesUpstageModel
+                        ? "현재 선택한 Solar Pro 2가 OpenAI 설정보다 우선 적용됩니다."
+                        : isOpenAIKeyApplied
                         ? `적용됨: ${maskedOpenAIKey} · AI 생성 시 ${getOpenAIModelLabel(selectedOpenAIModel)} 사용`
                         : "적용하지 않으면 로컬 LLM 모델로 생성합니다."}
                 </p>

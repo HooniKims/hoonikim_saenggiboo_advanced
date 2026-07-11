@@ -5,9 +5,10 @@ import { Plus, Trash2, Upload, Download, Wand2, FileSpreadsheet, Users, UserX, C
 import * as XLSX from "xlsx";
 import { writeExcel } from "../../utils/excel";
 import { getCharacterGuideline, getMinimumTargetBytes, getUtf8ByteLength, normalizeTargetBytes, normalizeTargetChars } from "../../utils/textProcessor";
-import { fetchStream, AVAILABLE_MODELS, DEFAULT_MODEL, getModelOptionLabel, isLightweightModel, isNvidiaModel } from "../../utils/streamFetch";
+import { fetchStream, AVAILABLE_MODELS, DEFAULT_MODEL, getModelOptionLabel, isLightweightModel, isNvidiaModel, isUpstageModel } from "../../utils/streamFetch";
 import { fetchNvidiaCompletion } from "../../utils/nvidiaFetch";
 import { fetchOpenAICompletion } from "../../utils/openAIFetch";
+import { fetchUpstageCompletion } from "../../utils/upstageFetch";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import { generateWithSilentValidation } from "../../utils/generationHarness";
@@ -50,8 +51,10 @@ export default function ClubPage() {
         setSelectedOpenAIModel,
     } = useOpenAIKey();
     const isNvidiaSelected = isNvidiaModel(selectedModel);
+    const isUpstageSelected = isUpstageModel(selectedModel);
     const generationStatusText = isNvidiaSelected
         ? "NVIDIA NIM 모델로 생성 중..."
+        : isUpstageSelected ? "Upstage Solar Pro 2로 생성 중..."
         : appliedOpenAIKey ? "OpenAI API key를 사용하여 생성 중..." : "생성 중...";
 
     useEffect(() => {
@@ -479,7 +482,7 @@ ${lengthInstruction}
                 }
             }
 
-            const promptModel = isNvidiaSelected ? selectedModel : appliedOpenAIKey ? `openai:${selectedOpenAIModel}` : selectedModel;
+            const promptModel = isNvidiaSelected || isUpstageSelected ? selectedModel : appliedOpenAIKey ? `openai:${selectedOpenAIModel}` : selectedModel;
             const prompt = generatePrompt(
                 student,
                 selectedActivityEntries,
@@ -490,19 +493,24 @@ ${lengthInstruction}
             );
             const generationResult = await generateWithSilentValidation({
                 prompt,
+                acceptLengthOnlyResult: !isUpstageSelected,
+                preserveTextOnLengthRepair: isUpstageSelected,
+                stripExpandedGradeLabels: isUpstageSelected,
                 maxTargetBytes: targetBytes,
                 minTargetBytes,
                 targetChars,
                 mode: "record",
                 forbiddenTerms: [clubName, student.name],
-                maxRepairAttempts: 1,
+                maxRepairAttempts: isUpstageSelected ? 4 : 2,
                 generateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
                     attempt,
                     previousValidation,
-                    provider: getGenerationProvider({ isNvidiaSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
+                    provider: getGenerationProvider({ isNvidiaSelected, isUpstageSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
                     setProgress: (message) => updateStudent(student.id, "progress", message),
                     run: () => isNvidiaSelected
                         ? fetchNvidiaCompletion({ prompt: nextPrompt, additionalInstructions, targetChars, model: selectedModel })
+                        : isUpstageSelected
+                            ? fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars })
                         : appliedOpenAIKey
                             ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions, apiKey: appliedOpenAIKey, targetChars, model: selectedOpenAIModel })
                             : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars }),
@@ -847,7 +855,7 @@ ${lengthInstruction}
 
                         <div className="flex flex-col gap-3">
                             <div className="form-group" style={{ marginBottom: 0 }}>
-                                <label className="form-label">로컬AI 모델</label>
+                                <label className="form-label">AI 모델</label>
                                 <select
                                     value={selectedModel}
                                     onChange={(e) => setSelectedModel(e.target.value)}
@@ -868,6 +876,7 @@ ${lengthInstruction}
                                 maskedOpenAIKey={maskedOpenAIKey}
                                 selectedOpenAIModel={selectedOpenAIModel}
                                 setSelectedOpenAIModel={setSelectedOpenAIModel}
+                                usesUpstageModel={isUpstageSelected}
                             />
                         </div>
                     </div>

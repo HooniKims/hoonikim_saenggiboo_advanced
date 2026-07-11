@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { runGenerationWithProgress } from "../utils/generationProgress.js";
+import { getGenerationProvider, runGenerationWithProgress } from "../utils/generationProgress.js";
 
 test("runGenerationWithProgress shows NVIDIA connection and generation stages separately", async () => {
     const messages = [];
@@ -56,6 +56,26 @@ test("runGenerationWithProgress shows local LLM connection and generation stages
         "로컬 LLM(lm.alluser.site) 접속 완료, 생성 요청 중...",
         "로컬 LLM(lm.alluser.site) 생성 중...",
     ]);
+});
+
+test("runGenerationWithProgress shows Upstage connection and generation stages separately", async () => {
+    const messages = [];
+    await runGenerationWithProgress({
+        provider: "upstage",
+        setProgress: (message) => messages.push(message),
+        sleep: async () => undefined,
+        run: async () => "done",
+    });
+
+    assert.deepEqual(messages, [
+        "Upstage Solar Pro 2 접속 중...",
+        "Upstage Solar Pro 2 접속 완료, 생성 요청 중...",
+        "Upstage Solar Pro 2 생성 중...",
+    ]);
+});
+
+test("getGenerationProvider prioritizes an explicitly selected Upstage model", () => {
+    assert.equal(getGenerationProvider({ isUpstageSelected: true, hasOpenAIKey: true }), "upstage");
 });
 
 test("runGenerationWithProgress uses user-friendly repair retry wording", async () => {

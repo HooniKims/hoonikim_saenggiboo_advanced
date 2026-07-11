@@ -16,6 +16,7 @@ export const AVAILABLE_MODELS = [
     { id: "gemma4:e2b", name: "Gemma 4 E2B", description: "가장 빠름, 간단 작업용", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E2B_MODEL },
     { id: "lmstudio:gemma-4-12b-it", name: "Gemma 4 12B", description: "기본 모델, 속도와 품질 균형", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_12B_MODEL },
     { id: "lmstudio:gemma-4-26b-a4b-it-q4ks", name: "Gemma 4 26B Q4", description: "가장 느림, 품질 높음", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_26B_MODEL },
+    { id: "upstage:solar-pro2", name: "Upstage Solar Pro 2", description: "다중 활동과 성취 수준 반영에 강함", isLightweight: false, provider: "upstage" },
 ];
 
 export const DEFAULT_LOCAL_MODEL = "lmstudio:gemma-4-12b-it";
@@ -27,6 +28,10 @@ export function getModelOptionLabel(model) {
 
 export function isNvidiaModel(modelId) {
     return String(modelId || "").startsWith("nvidia:");
+}
+
+export function isUpstageModel(modelId) {
+    return String(modelId || "").startsWith("upstage:");
 }
 
 export function getNvidiaModelId(modelId) {
@@ -154,6 +159,7 @@ function getLightweightSystemMessage() {
 6. 줄바꿈 없이 하나의 문단
 7. 요약/마무리 문장 금지. '마지막으로', '끝으로', '마무리하며', '덧붙여', '추가로' 사용 금지
 8. 오직 본문만 출력 (메타정보 출력 금지)
+9. 문장이 끝나면 마침표(.)를 찍고 한 칸 띄우며, 마지막 문장은 마침표(.)로 끝내고 바로 종료
 
 ❌ 잘못된 예: "국어 시간에 토론 활동을 했음." "과학실험을 수행하였음."
 ✅ 올바른 예: "토론 활동에서 찬반 입장을 논리적으로 정리하여 발표함." "실험 과정에서 변인을 통제하며 데이터를 분석함."`;
@@ -162,7 +168,7 @@ function getLightweightSystemMessage() {
 /**
  * 일반 모델용 시스템 메시지
  */
-function getStandardSystemMessage() {
+export function getStandardSystemMessage() {
     return `학교생활기록부 작성 전문가. 반드시 지킬 규칙:
 1. 현재형 명사 종결어미(~함, ~임, ~음, ~보임, ~드러남)만 사용. 과거형(~했음, ~였음, ~되었음, ~하였음, ~보였음) 절대 금지
 2. '학생은', '이 학생은' 등 주어 없이 활동부터 서술
@@ -172,7 +178,8 @@ function getStandardSystemMessage() {
 6. 요약, 정리, 결론 문장 작성하지 않음. '마지막으로', '끝으로', '마무리하며', '덧붙여', '추가로' 사용 금지
 7. 입력된 활동 외에 사실을 지어내지 않음
 8. 입력된 모든 활동 내용을 빠짐없이 반영하여 서술
-9. 오직 본문 텍스트만 출력 (글자수, 분석 등 메타정보 출력하지 않음)`;
+9. 문장이 끝나면 마침표(.)를 찍고 한 칸 띄우며, 마지막 문장은 마침표(.)로 끝내고 바로 종료
+10. 오직 본문 텍스트만 출력 (글자수, 분석 등 메타정보 출력하지 않음)`;
 }
 
 export function getLetterSystemMessage() {
@@ -186,14 +193,16 @@ export function getLetterSystemMessage() {
 7. 학교생활을 성실하게 수행했다는 일반적이고 따뜻한 평가에서 시작
 8. 한 학기 또는 한 해 동안 학교생활을 성실하게 수행한 내용은 과거 경어체(~했습니다, ~였습니다, ~보였습니다, ~돋보였습니다)로 작성
 9. 방학 동안 가정에서 지도할 내용은 권유형 경어체(~바랍니다, ~주시기 바랍니다)로 작성
-10. 학업 계획, 건강한 생활 리듬, 친구와의 배려 있는 관계, 가족과의 대화나 지지 중 최소 세 가지 이상을 반드시 반영하되 독립 문장으로 나누지 말고 하나의 흐름으로 연결
-11. 입력되지 않은 구체적인 활동, 실험, 탐구 주제, 수행 장면은 지어내지 않음
-12. 문장 사이에는 "그 과정에서", "이어", "나아가", "이러한 흐름이" 같은 연결 흐름을 자연스럽게 사용하되 반복하지 않음
-13. 추가 정보를 요청하지 말고 입력된 키워드만으로 완성
-14. 같은 시작 표현과 같은 가정 지도 문장을 반복하지 않고 매번 다른 관점으로 작성
-15. 마지막 문장은 반드시 완전한 경어체 문장과 마침표로 끝냄
-16. '마지막으로', '끝으로', '마무리하며', '덧붙여', '추가로' 같은 마무리 접속어를 사용하지 않음
-17. 오직 가정통신문 본문 텍스트만 출력`;
+10. "~해보세요", "~보세요", "~하세요", "~하십시오" 같은 직접 지시형/대화체 표현을 사용하지 않고 "~바랍니다", "~주시기 바랍니다", "~부탁드립니다"로 정중하게 작성
+11. 학업 계획, 건강한 생활 리듬, 친구와의 배려 있는 관계, 가족과의 대화나 지지 중 최소 세 가지 이상을 반드시 반영하되 독립 문장으로 나누지 말고 하나의 흐름으로 연결
+12. 입력되지 않은 구체적인 활동, 실험, 탐구 주제, 수행 장면은 지어내지 않음
+13. 문장 사이에는 "그 과정에서", "이어", "나아가", "이러한 흐름이" 같은 연결 흐름을 자연스럽게 사용하되 반복하지 않음
+14. 추가 정보를 요청하지 말고 입력된 키워드만으로 완성
+15. 같은 시작 표현과 같은 가정 지도 문장을 반복하지 않고 매번 다른 관점으로 작성
+16. 마지막 문장은 반드시 완전한 경어체 문장과 마침표로 끝냄
+17. '마지막으로', '끝으로', '마무리하며', '덧붙여', '추가로' 같은 마무리 접속어를 사용하지 않음
+18. 문장이 끝나면 마침표(.)를 찍고 한 칸 띄우며, 마지막 문장은 마침표(.)로 끝내고 바로 종료
+19. 오직 가정통신문 본문 텍스트만 출력`;
 }
 
 export async function fetchStream(bodyData) {
@@ -229,8 +238,8 @@ export async function fetchStream(bodyData) {
     // 완전한 문장으로 끝나는지 확인 → 아니면 재시도 (최대 2회)
     const MAX_RETRIES = 2;
     const endingInstruction = outputType === "letter"
-        ? "학교생활을 성실하게 수행했다는 일반적인 평가를 '~했습니다.', '~였습니다.', '~돋보였습니다.' 같은 과거 경어체로 쓰고, 입력된 키워드는 방학 조언 영역으로만 자연스럽게 연결하세요. 가정 지도 내용은 '~바랍니다.' 같은 권유형 경어체와 마침표로 끝내세요."
-        : "반드시 '~함.', '~음.', '~임.' 등 종결어미와 마침표로 끝내세요.";
+        ? "학교생활을 성실하게 수행했다는 일반적인 평가를 '~했습니다.', '~였습니다.', '~돋보였습니다.' 같은 과거 경어체로 쓰고, 입력된 키워드는 방학 조언 영역으로만 자연스럽게 연결하세요. 가정 지도 내용은 '~바랍니다.', '~주시기 바랍니다.' 같은 권유형 경어체와 마침표로 끝내고, 문장이 끝나면 마침표(.) 뒤에 한 칸을 띄우세요. 마지막 문장은 마침표(.)로 끝내고 바로 종료하세요. '해보세요', '보세요', '하세요', '하십시오' 같은 직접 지시형 표현은 사용하지 마세요."
+        : "반드시 '~함.', '~음.', '~임.' 등 종결어미와 마침표로 끝내세요. 문장이 끝나면 마침표(.) 뒤에 한 칸을 띄우고, 마지막 문장은 마침표(.)로 끝내고 바로 종료하세요.";
 
     for (let retry = 0; retry < MAX_RETRIES; retry++) {
         if (endsWithCompleteSentence(content, outputType)) {

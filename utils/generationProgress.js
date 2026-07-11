@@ -2,6 +2,7 @@ const PROVIDER_LABELS = {
     local: "로컬 LLM(lm.alluser.site)",
     nvidia: "NVIDIA Cloud 모델",
     openai: "OpenAI API",
+    upstage: "Upstage Solar Pro 2",
 };
 
 const DEFAULT_SLEEP_MS = 350;
@@ -59,8 +60,9 @@ export async function runGenerationWithProgress({
     return run();
 }
 
-export function getGenerationProvider({ isNvidiaSelected = false, hasOpenAIKey = false } = {}) {
+export function getGenerationProvider({ isNvidiaSelected = false, isUpstageSelected = false, hasOpenAIKey = false } = {}) {
     if (isNvidiaSelected) return "nvidia";
+    if (isUpstageSelected) return "upstage";
     if (hasOpenAIKey) return "openai";
     return "local";
 }

@@ -5,9 +5,10 @@ import { Trash2, Download, Wand2, Users, UserX, Copy, Check } from "lucide-react
 import * as XLSX from "xlsx";
 import { writeExcel } from "../../utils/excel";
 import { getCharacterGuideline, getMinimumTargetBytes, getUtf8ByteLength, normalizeTargetBytes, normalizeTargetChars } from "../../utils/textProcessor";
-import { fetchStream, AVAILABLE_MODELS, DEFAULT_MODEL, getModelOptionLabel, isNvidiaModel } from "../../utils/streamFetch";
+import { fetchStream, AVAILABLE_MODELS, DEFAULT_MODEL, getModelOptionLabel, isNvidiaModel, isUpstageModel } from "../../utils/streamFetch";
 import { fetchNvidiaCompletion } from "../../utils/nvidiaFetch";
 import { fetchOpenAICompletion } from "../../utils/openAIFetch";
+import { fetchUpstageCompletion } from "../../utils/upstageFetch";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import { generateWithSilentValidation } from "../../utils/generationHarness";
@@ -41,8 +42,10 @@ export default function LetterPage() {
         setSelectedOpenAIModel,
     } = useOpenAIKey();
     const isNvidiaSelected = isNvidiaModel(selectedModel);
+    const isUpstageSelected = isUpstageModel(selectedModel);
     const generationStatusText = isNvidiaSelected
         ? "NVIDIA NIM 모델로 생성 중..."
+        : isUpstageSelected ? "Upstage Solar Pro 2로 생성 중..."
         : appliedOpenAIKey ? "OpenAI API key를 사용하여 생성 중..." : "생성 중...";
 
     // Letter Specific State
@@ -198,7 +201,7 @@ export default function LetterPage() {
             ? "한 학기 동안 학교생활을 성실하게 수행했다는 일반적인 평가와 여름방학 동안 가정에서 살필 조언"
             : "한 해 동안 학교생활을 성실하게 수행했다는 일반적인 평가와 겨울방학 및 새 학기 준비를 위해 가정에서 살필 조언";
         const searchContextText = searchContext.trim()
-            ? `\n\n[가정통신문 키워드 기반 웹 검색 보강 자료]\n${searchContext}\n(위 검색 보강 자료는 방학 생활 지도, 학습 습관, 건강한 생활 리듬, 관계 형성 조언의 일반적 배경을 이해하기 위한 자료입니다. 학생이 실제로 보인 구체적 활동이나 관찰 사실처럼 꾸며 쓰지 말고, 가정에서 살필 조언의 표현을 자연스럽게 보강하는 데에만 사용하세요.)`
+            ? `\n\n[가정통신문 키워드 기반 웹 검색 보강 자료]\n${searchContext}\n(위 검색 보강 자료는 방학 생활 지도, 학습 습관, 건강한 생활 리듬, 관계 형성 조언의 일반적 배경을 이해하기 위한 자료입니다. 학생이 실제로 보인 구체적 활동이나 관찰 사실처럼 꾸며 쓰지 말고, 가정에서 살필 조언의 표현을 자연스럽게 보강하는 데에만 사용할 것.)`
             : "";
 
         return `당신은 담임 교사입니다. 학기말 통지표에 들어갈 '가정통신문(종합의견)' 본문을 작성하세요.
@@ -224,6 +227,7 @@ ${keywordContext}${searchContextText}
 15. 문장 사이에는 "그 과정에서", "이어", "나아가", "이러한 흐름이" 같은 연결 흐름을 자연스럽게 사용할 것
 16. 추가 정보를 요청하지 말고 입력된 키워드만으로 완성할 것
 17. 방학 동안 가정에서 지도할 내용은 권유형 경어체("~바랍니다.", "~주시기 바랍니다.")로 마무리할 것
+18. "~해보세요.", "~보세요.", "~하세요.", "~하십시오." 같은 직접 지시형/대화체 표현은 사용하지 말고 "~바랍니다.", "~주시기 바랍니다.", "~부탁드립니다."로 정중하게 쓸 것
 
 ${ruleTermInstruction}
 
@@ -237,7 +241,7 @@ ${lengthInstruction}
 - "학업, 건강, 친구관계, 가족관계"처럼 키워드를 쉼표로 나열하지 않음
 
 <좋은 예시>
-"한 학기 동안 학교생활에 성실하게 참여하며 맡은 일을 차분히 해내는 모습이 돋보였습니다. 여름방학 동안에는 배움의 흐름을 이어 갈 수 있도록 무리하지 않는 학습 계획을 세우고, 건강한 생활 리듬을 지키며 가족과의 대화 속에서 마음을 안정적으로 돌보는 시간을 가져 보시기 바랍니다. 친구들과도 서로를 배려하는 관계를 이어 갈 수 있도록 가정에서 함께 살펴봐 주시기 바랍니다."
+"한 학기 동안 학교생활에 성실하게 참여하며 맡은 일을 차분히 해내는 모습이 돋보였습니다. 여름방학 동안에는 배움의 흐름을 이어 갈 수 있도록 무리하지 않는 학습 계획을 세우고, 건강한 생활 리듬을 지키며 가족과의 대화 속에서 마음을 안정적으로 돌보는 시간을 마련해 주시기 바랍니다. 친구들과도 서로를 배려하는 관계를 이어 갈 수 있도록 가정에서 함께 살펴봐 주시기 바랍니다."
     `;
     };
 
@@ -271,6 +275,9 @@ ${lengthInstruction}
             const prompt = generatePrompt(targetChars, searchContext);
             const generationResult = await generateWithSilentValidation({
                 prompt,
+                acceptLengthOnlyResult: !isUpstageSelected,
+                preserveTextOnLengthRepair: isUpstageSelected,
+                stripExpandedGradeLabels: isUpstageSelected,
                 maxTargetBytes: targetBytes,
                 minTargetBytes,
                 targetChars,
@@ -283,10 +290,12 @@ ${lengthInstruction}
                 generateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
                     attempt,
                     previousValidation,
-                    provider: getGenerationProvider({ isNvidiaSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
+                    provider: getGenerationProvider({ isNvidiaSelected, isUpstageSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
                     setProgress: (message) => updateStudent(student.id, "progress", message),
                     run: () => isNvidiaSelected
                         ? fetchNvidiaCompletion({ prompt: nextPrompt, targetChars, model: selectedModel, outputType: "letter" })
+                        : isUpstageSelected
+                            ? fetchUpstageCompletion({ prompt: nextPrompt, targetChars, outputType: "letter" })
                         : appliedOpenAIKey
                             ? fetchOpenAICompletion({ prompt: nextPrompt, apiKey: appliedOpenAIKey, targetChars, model: selectedOpenAIModel, outputType: "letter" })
                             : fetchStream({ prompt: nextPrompt, model: selectedModel, targetChars, outputType: "letter" }),
@@ -492,7 +501,7 @@ ${lengthInstruction}
                         </div>
 
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label className="form-label">로컬AI 모델</label>
+                            <label className="form-label">AI 모델</label>
                             <select
                                 value={selectedModel}
                                 onChange={(e) => setSelectedModel(e.target.value)}
@@ -513,6 +522,7 @@ ${lengthInstruction}
                             maskedOpenAIKey={maskedOpenAIKey}
                             selectedOpenAIModel={selectedOpenAIModel}
                             setSelectedOpenAIModel={setSelectedOpenAIModel}
+                            usesUpstageModel={isUpstageSelected}
                         />
 
                         <label

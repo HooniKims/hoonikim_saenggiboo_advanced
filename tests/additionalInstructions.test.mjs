@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { DEFAULT_OPENAI_MODEL, fetchOpenAICompletion, normalizeOpenAIModel, OPENAI_MODELS } from "../utils/openAIFetch.js";
-import { AVAILABLE_MODELS, fetchStream, getLocalModelConfig, getMaxTokensForLocalModel, getModelOptionLabel } from "../utils/streamFetch.js";
+import { AVAILABLE_MODELS, fetchStream, getLocalModelConfig, getMaxTokensForLocalModel, getModelOptionLabel, isUpstageModel } from "../utils/streamFetch.js";
 import { POST } from "../app/api/openai-generate/route.js";
 
 test("fetchStream sandwiches additional instructions into system and user messages", async () => {
@@ -271,6 +271,20 @@ test("larger LM Studio local models get expanded max token budget", () => {
     assert.equal(getMaxTokensForLocalModel("gemma4:e4b", 589), 3072);
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 589), 4096);
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-26b-a4b-it-q4ks", 589), 4096);
+});
+
+test("AI model list exposes Upstage Solar Pro 2 as a server-backed option", () => {
+    const solar = AVAILABLE_MODELS.find((model) => model.id === "upstage:solar-pro2");
+
+    assert.deepEqual(solar, {
+        id: "upstage:solar-pro2",
+        name: "Upstage Solar Pro 2",
+        description: "다중 활동과 성취 수준 반영에 강함",
+        isLightweight: false,
+        provider: "upstage",
+    });
+    assert.equal(isUpstageModel(solar.id), true);
+    assert.equal(isUpstageModel("lmstudio:gemma-4-12b-it"), false);
 });
 
 test("unknown local model fallback also uses lm.alluser.site", () => {

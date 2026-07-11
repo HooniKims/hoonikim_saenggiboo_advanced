@@ -100,3 +100,12 @@ test("gwasetuk prompt defines visibly different writing strength for A through E
     assert.match(source, /D와 E 활동을 C 수준으로 완화하지 않음/);
     assert.match(source, /선택한 A\/B\/C\/D\/E 등급 문구를 그대로 반복하지 말고/);
 });
+
+test("gwasetuk prompt forbids exposing internal activity grade labels", () => {
+    assert.match(source, /등급 기호와 라벨은 내부 반영 기준일 뿐/);
+    assert.match(source, /\[A\]/);
+    assert.match(source, /\(A\)/);
+    assert.match(source, /A등급/);
+    assert.match(source, /활동1\[A\]/);
+    assert.match(source, /본문에 절대 출력하지 않음/);
+});
