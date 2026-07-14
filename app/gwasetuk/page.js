@@ -24,14 +24,6 @@ const SOLAR_GRADE_EVIDENCE = {
     D: ["반복적인 안내", "많은 보완", "지속적인 교사 지원", "다시 확인"],
     E: ["기본 요건", "개별 지도", "기초 학습 지원", "매우 많은 보완"],
 };
-const SOLAR_GRADE_EXPANSION = {
-    A: () => "주도적 심화 탐구로 새로운 관점을 제시함.",
-    B: (anchor) => `${anchor} 수행의 핵심 내용을 이해하고 맡은 역할을 충실히 완성함.`,
-    C: (anchor) => `${anchor} 수행 과정의 기초 이해와 결과 표현을 단계적으로 보완할 필요가 있음.`,
-    D: (anchor) => `${anchor} 해석에서 반복 안내와 교사 지원을 통한 지속적인 보완이 필요함.`,
-    E: (anchor) => `${anchor} 기본 요건 충족을 위해 개별 지도와 기초 학습 지원이 필요함.`,
-};
-
 const getActivityEvidenceTerms = (text) => {
     const firstClause = String(text || "").trim().replace(/\s+/g, " ").split(/[,.!?]/)[0];
     const words = firstClause.split(" ").filter(Boolean);
@@ -107,10 +99,7 @@ export default function GwasetukPage() {
     } = useOpenAIKey();
     const isNvidiaSelected = isNvidiaModel(selectedModel);
     const isUpstageSelected = isUpstageModel(selectedModel);
-    const generationStatusText = isNvidiaSelected
-        ? "NVIDIA NIM 모델로 생성 중..."
-        : isUpstageSelected ? "Upstage Solar Pro 2로 생성 중..."
-        : appliedOpenAIKey ? "OpenAI API key를 사용하여 생성 중..." : "생성 중...";
+    const generationStatusText = "AI로 생성 중...";
 
     useEffect(() => {
         setStudents(prevStudents => {
@@ -576,36 +565,6 @@ ${lengthInstruction}
                 promptModel,
                 searchContext
             );
-            const expandSolarPreviousText = (previousText) => {
-                let expandedText = previousText.trim();
-                for (let round = 0; round < 2; round += 1) {
-                    for (const entry of selectedActivityEntries) {
-                        const anchor = getActivityEvidenceTerms(entry.text)[0] || "입력 활동";
-                        const addition = SOLAR_GRADE_EXPANSION[entry.grade](anchor);
-                        const candidate = `${expandedText} ${addition}`.trim();
-                        if (candidate.length <= generationTargetChars && getUtf8ByteLength(candidate) <= targetBytes) {
-                            expandedText = candidate;
-                        }
-                        if (getUtf8ByteLength(expandedText) >= minTargetBytes) return expandedText;
-                    }
-                }
-                return expandedText;
-            };
-            const restoreMissingSolarActivities = (previousText, issues) => {
-                let restoredText = previousText.trim();
-                const missingIndexes = (issues || [])
-                    .filter((issue) => issue.code === "missing_required_content")
-                    .map((issue) => Number(issue.detail.match(/^활동(\d+)/)?.[1]) - 1)
-                    .filter((index) => Number.isInteger(index) && selectedActivityEntries[index]);
-                for (const index of missingIndexes) {
-                    const activityText = selectedActivityEntries[index].text.trim().replace(/[.!?]*$/, ".");
-                    const candidate = `${restoredText} ${activityText}`.trim();
-                    if (candidate.length <= generationTargetChars && getUtf8ByteLength(candidate) <= targetBytes) {
-                        restoredText = candidate;
-                    }
-                }
-                return restoredText;
-            };
             const generationResult = await generateWithSilentValidation({
                 prompt,
                 acceptLengthOnlyResult: !isUpstageSelected,
@@ -618,7 +577,7 @@ ${lengthInstruction}
                 mode: "record",
                 forbiddenTerms: [subjectName, student.name],
                 maxRepairAttempts: isUpstageSelected ? 4 : 2,
-                generateOnce: (nextPrompt, { attempt, previousText, previousValidation }) => runGenerationWithProgress({
+                generateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
                     attempt,
                     previousValidation,
                     provider: getGenerationProvider({ isNvidiaSelected, isUpstageSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
@@ -626,12 +585,7 @@ ${lengthInstruction}
                     run: () => isNvidiaSelected
                         ? fetchNvidiaCompletion({ prompt: nextPrompt, additionalInstructions, targetChars: generationTargetChars, model: selectedModel })
                         : isUpstageSelected
-                            ? attempt > 0
-                                && previousText
-                                ? previousValidation?.issues.some((issue) => issue.code === "missing_required_content" && issue.detail.startsWith("활동"))
-                                    ? Promise.resolve(restoreMissingSolarActivities(previousText, previousValidation.issues))
-                                    : Promise.resolve(expandSolarPreviousText(previousText))
-                                : fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars: generationTargetChars })
+                            ? fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars: generationTargetChars })
                         : appliedOpenAIKey
                             ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions, apiKey: appliedOpenAIKey, targetChars: generationTargetChars, model: selectedOpenAIModel })
                             : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars: generationTargetChars }),

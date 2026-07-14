@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { getGenerationProvider, runGenerationWithProgress } from "../utils/generationProgress.js";
 
-test("runGenerationWithProgress shows NVIDIA connection and generation stages separately", async () => {
+test("runGenerationWithProgress shows provider-neutral connection and generation stages", async () => {
     const messages = [];
     const result = await runGenerationWithProgress({
         provider: "nvidia",
@@ -16,9 +16,9 @@ test("runGenerationWithProgress shows NVIDIA connection and generation stages se
 
     assert.equal(result, "done");
     assert.deepEqual(messages, [
-        "NVIDIA Cloud 모델 접속 중...",
-        "NVIDIA Cloud 모델 접속 완료, 생성 요청 중...",
-        "NVIDIA Cloud 모델 생성 중...",
+        "AI 연결 중...",
+        "AI 연결 완료, 생성 요청 중...",
+        "AI로 생성 중...",
     ]);
 });
 
@@ -34,9 +34,9 @@ test("runGenerationWithProgress shows OpenAI connection and generation stages se
     });
 
     assert.deepEqual(messages, [
-        "OpenAI API 접속 중...",
-        "OpenAI API 접속 완료, 생성 요청 중...",
-        "OpenAI API 생성 중...",
+        "AI 연결 중...",
+        "AI 연결 완료, 생성 요청 중...",
+        "AI로 생성 중...",
     ]);
 });
 
@@ -52,9 +52,9 @@ test("runGenerationWithProgress shows local LLM connection and generation stages
     });
 
     assert.deepEqual(messages, [
-        "로컬 LLM(lm.alluser.site) 접속 중...",
-        "로컬 LLM(lm.alluser.site) 접속 완료, 생성 요청 중...",
-        "로컬 LLM(lm.alluser.site) 생성 중...",
+        "AI 연결 중...",
+        "AI 연결 완료, 생성 요청 중...",
+        "AI로 생성 중...",
     ]);
 });
 
@@ -68,9 +68,9 @@ test("runGenerationWithProgress shows Upstage connection and generation stages s
     });
 
     assert.deepEqual(messages, [
-        "Upstage Solar Pro 2 접속 중...",
-        "Upstage Solar Pro 2 접속 완료, 생성 요청 중...",
-        "Upstage Solar Pro 2 생성 중...",
+        "AI 연결 중...",
+        "AI 연결 완료, 생성 요청 중...",
+        "AI로 생성 중...",
     ]);
 });
 

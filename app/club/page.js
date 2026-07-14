@@ -52,10 +52,7 @@ export default function ClubPage() {
     } = useOpenAIKey();
     const isNvidiaSelected = isNvidiaModel(selectedModel);
     const isUpstageSelected = isUpstageModel(selectedModel);
-    const generationStatusText = isNvidiaSelected
-        ? "NVIDIA NIM 모델로 생성 중..."
-        : isUpstageSelected ? "Upstage Solar Pro 2로 생성 중..."
-        : appliedOpenAIKey ? "OpenAI API key를 사용하여 생성 중..." : "생성 중...";
+    const generationStatusText = "AI로 생성 중...";
 
     useEffect(() => {
         if (activities.length > prevActivitiesLength.current) {

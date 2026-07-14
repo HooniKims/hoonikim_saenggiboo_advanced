@@ -1,15 +1,4 @@
-const PROVIDER_LABELS = {
-    local: "로컬 LLM(lm.alluser.site)",
-    nvidia: "NVIDIA Cloud 모델",
-    openai: "OpenAI API",
-    upstage: "Upstage Solar Pro 2",
-};
-
 const DEFAULT_SLEEP_MS = 350;
-
-function getProviderLabel(provider) {
-    return PROVIDER_LABELS[provider] || "AI 모델";
-}
 
 function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -51,12 +40,11 @@ export async function runGenerationWithProgress({
         return run();
     }
 
-    const label = getProviderLabel(provider);
-    setProgress?.(`${label} 접속 중...`);
+    setProgress?.("AI 연결 중...");
     await sleep(stepDelayMs);
-    setProgress?.(`${label} 접속 완료, 생성 요청 중...`);
+    setProgress?.("AI 연결 완료, 생성 요청 중...");
     await sleep(stepDelayMs);
-    setProgress?.(`${label} 생성 중...`);
+    setProgress?.("AI로 생성 중...");
     return run();
 }
 

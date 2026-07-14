@@ -8,6 +8,7 @@ import {
 } from "./textProcessor.js";
 
 const RECORD_ENDINGS = "함|음|임|됨|봄|옴|줌|춤|움|늠|름|남|냄|김|킴|짐|님|감|침|보임|드러남|나타남|돋보임|지님|뛰어남";
+const RECORD_SENTENCE_BOUNDARY_ENDINGS = `${RECORD_ENDINGS}|다|요|까|니`;
 const LETTER_ENDINGS = "습니다|합니다|입니다|됩니다|바랍니다|드립니다|좋겠습니다|필요합니다|응원합니다";
 const RECORD_ENDING_PATTERN = new RegExp(`(?:${RECORD_ENDINGS})\\.\\s*$`);
 const LETTER_ENDING_PATTERN = new RegExp(`(?:${LETTER_ENDINGS})\\.\\s*$`);
@@ -24,9 +25,9 @@ const RECORD_GRADE_LABEL_PATTERN = /(?:활동\s*\d+\s*)?[\[(]\s*[A-E]\s*[\])]|(?
 const RECORD_GRADE_LABEL_GLOBAL_PATTERN = /(?:활동\s*\d+\s*)?[\[(]\s*[A-E]\s*[\])]|(?:^|[\s"'“”‘’])(?:[A-E]\s*(?:등급|급)|등급\s*[A-E])(?=$|[\s,.!?)]|[가-힣])/g;
 const LETTER_DIRECT_ADVICE_PATTERN = /(?:해\s*보세요|보세요|하세요|하십시오)/;
 const SENTENCE_SPACING_PATTERN = /[!?]|\s+\.|\. {2,}|(?<!\.)\.(?=\S)/;
-const RECORD_MISSING_PERIOD_PATTERN = new RegExp(`(?:${RECORD_ENDINGS})(?![.!?])\\s+(?=[가-힣A-Za-z0-9"'“”‘’(])`);
+const RECORD_MISSING_PERIOD_PATTERN = new RegExp(`(?:${RECORD_SENTENCE_BOUNDARY_ENDINGS})(?![.!?])\\s+(?=[가-힣A-Za-z0-9"'“”‘’(])`);
 const LETTER_MISSING_PERIOD_PATTERN = new RegExp(`(?:${LETTER_ENDINGS})(?![.!?])\\s+(?=[가-힣A-Za-z0-9"'“”‘’(])`);
-const RECORD_MISSING_PERIOD_GLOBAL_PATTERN = new RegExp(`(${RECORD_ENDINGS})(?![.!?])\\s+(?=[가-힣A-Za-z0-9"'“”‘’(])`, "g");
+const RECORD_MISSING_PERIOD_GLOBAL_PATTERN = new RegExp(`(${RECORD_SENTENCE_BOUNDARY_ENDINGS})(?![.!?])\\s+(?=[가-힣A-Za-z0-9"'“”‘’(])`, "g");
 const LETTER_MISSING_PERIOD_GLOBAL_PATTERN = new RegExp(`(${LETTER_ENDINGS})(?![.!?])\\s+(?=[가-힣A-Za-z0-9"'“”‘’(])`, "g");
 const MAX_CHARS = 650;
 const NON_BLOCKING_GENERATION_ISSUE_CODES = new Set(["under_min_chars", "under_min_bytes"]);
@@ -359,18 +360,19 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
         && isLengthShortfall
         && !hasMissingRequiredContent;
     const shortfallRewriteInstruction = shouldPreserveShortfallText
-        ? `기존 본문의 문장을 삭제하거나 요약하거나 축약하지 말고 그대로 유지하세요. 기존 본문 뒤에 핵심 키워드의 다른 관찰 관점과 성취 수준을 담은 새 문장만 추가한 뒤, 기존 문장과 추가 문장을 합친 전체 본문을 반환하세요.`
+        ? `기존 본문은 시스템이 유지합니다. 기존 본문을 다시 출력하거나 요약하지 말고, 핵심 키워드의 다른 관찰 관점과 성취 수준을 담아 뒤에 추가할 새 문장만 반환하세요.`
         : hasMissingRequiredContent
             ? "누락된 활동이 뒤에서 잘리지 않도록 기존 글을 그대로 이어 붙이지 말고, 모든 필수 활동에 분량을 균등하게 나누어 전체 본문을 다시 작성하세요."
             : "의미는 유지하되 규칙에 맞게 다시 작성하세요.";
     const expansionRules = preserveTextOnLengthRepair
-        ? `- 분량이 부족하면 핵심 키워드의 의미 범위 안에서 수행 과정, 참여 태도, 사고 수준, 피드백 반영, 성취 수준을 세분화함
+        ? `- 분량이 부족하면 핵심 키워드의 의미 범위 안에서 동기, 수행 과정, 사고 수준, 참여 태도, 피드백 반영을 자연스럽게 창작·보완하고 성취 수준을 구체화함
 - 같은 활동을 서로 다른 관찰 관점으로 풀어 여러 문장으로 전개하고 표현과 문장 구조를 반복하지 않음
 - 입력된 활동의 동기, 수행 과정, 관찰 가능한 결과, 성장 단서를 자연스럽게 연결함
-- 새 사실로 볼 수 있는 입력에 없는 작품명, 수상, 기관, 수치, 도구, 실험 결과 같은 검증 불가능한 내용을 지어내지 않음`
+- 입력에 없는 작품명, 수상, 기관, 점수, 수치, 도구, 실험 결과 같은 검증 불가능한 새 사실은 지어내지 않음`
         : `- 분량이 부족하면 입력 활동의 과정, 근거, 태도, 변화, 구체적 수행 장면을 더 촘촘하게 풀어 씀
 - 입력된 활동의 동기, 수행 과정, 관찰 가능한 결과, 성장 단서를 자연스럽게 연결함
-- 새 사실, 새 활동, 새 작품, 새 수상, 새 기관, 새 실험 결과를 지어내지 않음`;
+- 입력 핵심어 범위에서 수행 과정, 사고 수준, 참여 태도, 피드백 반영을 자연스럽게 창작·보완함
+- 입력에 없는 작품명, 수상, 기관, 점수, 수치, 도구, 실험 결과 같은 검증 불가능한 새 사실은 지어내지 않음`;
 
     return `아래 글은 내부 규칙 검증에서 실패했습니다. ${shortfallRewriteInstruction}
 
@@ -380,8 +382,9 @@ ${issueText || "- 규칙 위반"}
 [수정 규칙]
 - ${minAllowed > 0 ? `${minAllowed}자 이상 ${maxAllowed}자 이하로 작성` : `${maxAllowed}자 이하로 작성`}
 - ${maxAllowedBytes > 0 && minAllowedBytes > 0 ? `${minAllowedBytes}byte 이상 ${maxAllowedBytes}byte 이하를 반드시 맞춤` : minAllowedBytes > 0 ? `${minAllowedBytes}byte 이상을 반드시 채움` : "선택한 글자수 제한에 충분히 가깝게 작성"}
-${shouldPreserveShortfallText ? "- 기존 본문의 모든 문장을 그대로 보존하고, 부족한 분량만 새 관찰 문장으로 보충함" : ""}
+${shouldPreserveShortfallText ? "- 기존 본문과 겹치지 않는 새 관찰 문장만 작성해 부족한 분량을 보충함" : ""}
 ${expansionRules}
+- 원래 작성 조건에 개인별 활동 내용이 있으면 그 수행, 역할, 관찰 단서를 우선 활용해 구체화함
 - 줄바꿈 없이 하나의 문단으로만 작성
 - 제목, 번호, 분석, 글자수 설명 없이 본문만 출력
 - 지침 충돌을 설명하지 않고 '주의', '시스템 오류', '재작성 요청', '사용자 추가 지침' 같은 메타 문구를 출력하지 않음
@@ -525,6 +528,7 @@ function sanitizeByRules(text, options = {}) {
             .filter((sentence) => !META_TEXT_PATTERN.test(sentence))
             .filter((sentence) => mode !== "record" || !SUMMARY_CLOSING_PATTERN.test(sentence))
             .filter((sentence) => !COMMON_CLOSING_TRANSITION_PATTERN.test(sentence))
+            .filter((sentence, index, allSentences) => allSentences.indexOf(sentence) === index)
             .join(" ");
     } else {
         result = result.replace(COMMON_CLOSING_TRANSITION_PATTERN, "$1");
@@ -756,7 +760,12 @@ export async function generateWithSilentValidation({
             previousText: lastText,
             previousValidation: lastValidation,
         });
-        let text = finalizeGeneratedText(rawText, targetChars, maxTargetBytes, mode, {
+        const shouldAppendLengthRepair = preserveTextOnLengthRepair
+            && attempt > 0
+            && lastText
+            && hasOnlyNonBlockingGenerationIssues(lastValidation?.issues || [], mode);
+        const generatedText = shouldAppendLengthRepair ? `${lastText} ${rawText}` : rawText;
+        let text = finalizeGeneratedText(generatedText, targetChars, maxTargetBytes, mode, {
             bannedTerms,
             requiredTerms,
             stripExpandedGradeLabels,
@@ -863,9 +872,6 @@ export async function generateWithSilentValidation({
         };
     }
 
-    const issueText = validation.issues
-        .map((issue) => `${issue.message}${issue.detail ? `(${issue.detail})` : ""}`)
-        .join(", ");
     if (acceptLengthOnlyResult && hasOnlyNonBlockingGenerationIssues(validation.issues, mode)) {
         return {
             text: sanitized,
@@ -876,6 +882,19 @@ export async function generateWithSilentValidation({
         };
     }
 
+    if (sanitized) {
+        return {
+            text: sanitized,
+            attempts: maxRepairAttempts + 1,
+            repaired: maxRepairAttempts > 0,
+            validation,
+            acceptedWithValidationWarning: true,
+        };
+    }
+
+    const issueText = validation.issues
+        .map((issue) => `${issue.message}${issue.detail ? `(${issue.detail})` : ""}`)
+        .join(", ");
     const error = new Error(`내부 검증 실패: ${issueText || "규칙 미충족"}`);
     error.validation = validation;
     error.text = sanitized;

@@ -43,10 +43,7 @@ export default function LetterPage() {
     } = useOpenAIKey();
     const isNvidiaSelected = isNvidiaModel(selectedModel);
     const isUpstageSelected = isUpstageModel(selectedModel);
-    const generationStatusText = isNvidiaSelected
-        ? "NVIDIA NIM 모델로 생성 중..."
-        : isUpstageSelected ? "Upstage Solar Pro 2로 생성 중..."
-        : appliedOpenAIKey ? "OpenAI API key를 사용하여 생성 중..." : "생성 중...";
+    const generationStatusText = "AI로 생성 중...";
 
     // Letter Specific State
     const [season, setSeason] = useState("summer"); // summer, winter
