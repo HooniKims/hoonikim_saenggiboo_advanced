@@ -98,6 +98,28 @@ test("validateGeneratedText enforces period and one-space sentence boundaries", 
     }
 });
 
+test("finalizeGeneratedText inserts a period before a following sentence after a declarative ending", () => {
+    // Given
+    const rawText = "토론에서 다양한 근거를 비교하여 설득력을 높인다 발표에서 질문에 답변함";
+
+    // When
+    const text = finalizeGeneratedText(rawText, 120, 0, "record");
+
+    // Then
+    assert.equal(text, "토론에서 다양한 근거를 비교하여 설득력을 높인다. 발표에서 질문에 답변함.");
+});
+
+test("finalizeGeneratedText removes a repeated final sentence", () => {
+    // Given
+    const rawText = "토론에서 근거를 비교하여 주장을 정리함. 발표에서 질문에 답변함. 발표에서 질문에 답변함.";
+
+    // When
+    const text = finalizeGeneratedText(rawText, 160, 0, "record");
+
+    // Then
+    assert.equal(text, "토론에서 근거를 비교하여 주장을 정리함. 발표에서 질문에 답변함.");
+});
+
 test("validateGeneratedText accepts common noun endings used in records", () => {
     for (const text of [
         "드리블 상황에서 움직임을 예술적인 차원으로 끌어올리는 탐구 정신을 지님.",
@@ -694,6 +716,28 @@ test("buildRepairPrompt preserves source facts without exposing framework labels
     assert.match(prompt, /새 사실.*지어내지/);
 });
 
+test("buildRepairPrompt allows grounded creative detail while blocking unverifiable specifics", () => {
+    // Given
+    const issues = [{ code: "under_min_bytes", message: "목표 byte 미달" }];
+
+    // When
+    const prompt = buildRepairPrompt({
+        text: "토론에서 근거를 비교함.",
+        issues,
+        sourcePrompt: "토론 활동을 기록하세요. 개인별 활동: 반론 근거 표를 만들어 발표함.",
+        targetChars: 300,
+        minTargetBytes: 600,
+        maxTargetBytes: 700,
+        mode: "record",
+        preserveTextOnLengthRepair: true,
+    });
+
+    // Then
+    assert.match(prompt, /수행 과정.*사고.*태도.*피드백.*자연스럽게 창작/);
+    assert.match(prompt, /개인별 활동.*우선 활용.*구체화/);
+    assert.match(prompt, /작품명.*수상.*기관.*점수.*수치/);
+});
+
 test("buildRepairPrompt reminds models to use period-space sentence boundaries", () => {
     const prompt = buildRepairPrompt({
         text: "토론 활동에서 근거 자료를 정리함 발표함.",
@@ -750,7 +794,7 @@ test("buildRepairPrompt makes byte shortfall explicit for long byte targets", ()
     assert.ok(prompt.includes("Write 648-678 Korean visible characters"));
 });
 
-test("buildRepairPrompt preserves existing text and appends observations for short output", () => {
+test("buildRepairPrompt asks for only new observations during short-output repair", () => {
     const prompt = buildRepairPrompt({
         text: "자료를 조사하고 결과를 발표함.",
         issues: [{ code: "under_min_bytes", message: "목표 byte 미달" }],
@@ -762,9 +806,9 @@ test("buildRepairPrompt preserves existing text and appends observations for sho
         preserveTextOnLengthRepair: true,
     });
 
-    assert.match(prompt, /문장을 삭제하거나 요약하거나 축약하지 말고 그대로 유지/);
-    assert.match(prompt, /새 문장만 추가/);
-    assert.match(prompt, /기존 문장과 추가 문장을 합친 전체 본문/);
+    assert.match(prompt, /기존 본문은 시스템이 유지/);
+    assert.match(prompt, /기존 본문을 다시 출력하거나 요약하지 말고/);
+    assert.match(prompt, /추가할 새 문장만 반환/);
 });
 
 test("buildRepairPrompt keeps the existing repair behavior by default", () => {
@@ -878,20 +922,86 @@ test("generateWithSilentValidation preserves normal preparation phrases", async 
     assert.equal(result.validation.ok, true);
 });
 
-test("generateWithSilentValidation can reject final output when length-only acceptance is disabled", async () => {
-    await assert.rejects(
-        () => generateWithSilentValidation({
-            prompt: "원본 프롬프트",
-            acceptLengthOnlyResult: false,
-            minTargetBytes: 1350,
-            minTargetChars: 0,
-            targetChars: 490,
-            mode: "record",
-            maxRepairAttempts: 1,
-            generateOnce: async () => "공의 궤적을 예측하고 드리블 방향을 조절함.",
-        }),
-        /목표 byte 미달/,
+test("generateWithSilentValidation retries before returning final output when length-only acceptance is disabled", async () => {
+    let calls = 0;
+    const result = await generateWithSilentValidation({
+        prompt: "원본 프롬프트",
+        acceptLengthOnlyResult: false,
+        minTargetBytes: 1350,
+        minTargetChars: 0,
+        targetChars: 490,
+        mode: "record",
+        maxRepairAttempts: 1,
+        generateOnce: async () => {
+            calls += 1;
+            return "공의 궤적을 예측하고 드리블 방향을 조절함.";
+        },
+    });
+
+    assert.equal(calls, 2);
+    assert.equal(result.acceptedWithValidationWarning, true);
+    assert.deepEqual(result.validation.issues.map((issue) => issue.code), ["under_min_bytes"]);
+});
+
+test("generateWithSilentValidation returns generated text when repairs still leave validation warnings", async () => {
+    // Given
+    let calls = 0;
+
+    // When
+    const result = await generateWithSilentValidation({
+        prompt: "원본 프롬프트",
+        acceptLengthOnlyResult: false,
+        minTargetBytes: 1350,
+        minTargetChars: 0,
+        targetChars: 490,
+        mode: "record",
+        maxRepairAttempts: 1,
+        requiredContentGroups: [{ label: "개인별 활동", terms: ["반론 근거 표"] }],
+        generateOnce: async () => {
+            calls += 1;
+            return "공의 궤적을 예측하고 드리블 방향을 조절함.";
+        },
+    });
+
+    // Then
+    assert.equal(calls, 2);
+    assert.equal(result.text, "공의 궤적을 예측하고 드리블 방향을 조절함.");
+    assert.equal(result.acceptedWithValidationWarning, true);
+    assert.deepEqual(
+        result.validation.issues.map((issue) => issue.code),
+        ["under_min_bytes", "missing_required_content"],
     );
+});
+
+test("generateWithSilentValidation accumulates newly created Solar sentences during length repair", async () => {
+    // Given
+    const responses = [
+        "기후 변화가 생태계에 미치는 영향을 조사하고 근거를 정리함.",
+        "반론 근거 표를 직접 만들어 발표하고 친구 질문에 근거를 들어 답변함.",
+    ];
+    let calls = 0;
+
+    // When
+    const result = await generateWithSilentValidation({
+        prompt: "공통 활동과 개인별 활동을 모두 반영하세요.",
+        acceptLengthOnlyResult: false,
+        preserveTextOnLengthRepair: true,
+        minTargetBytes: 150,
+        maxTargetBytes: 600,
+        minTargetChars: 0,
+        targetChars: 236,
+        mode: "record",
+        maxRepairAttempts: 1,
+        generateOnce: async () => responses[calls++],
+    });
+
+    // Then
+    assert.equal(calls, 2);
+    assert.equal(
+        result.text,
+        "기후 변화가 생태계에 미치는 영향을 조사하고 근거를 정리함. 반론 근거 표를 직접 만들어 발표하고 친구 질문에 근거를 들어 답변함.",
+    );
+    assert.equal(result.validation.ok, true);
 });
 
 test("generateWithSilentValidation returns sanitized final text when final validation passes", async () => {
@@ -932,27 +1042,27 @@ test("generateWithSilentValidation can accept generation before length-only repa
     assert.ok(result.validation.issues.every((issue) => issue.code === "under_min_bytes"));
 });
 
-test("generateWithSilentValidation rejects short incomplete output", async () => {
+test("generateWithSilentValidation returns short incomplete output after repair attempts", async () => {
     let calls = 0;
 
-    await assert.rejects(
-        () => generateWithSilentValidation({
-            prompt: "원본 프롬프트",
-            minTargetBytes: 900,
-            minTargetChars: 0,
-            targetChars: 490,
-            mode: "record",
-            maxRepairAttempts: 1,
-            generateOnce: async () => {
-                calls += 1;
-                return "공의 궤적을 예측하고 드리블 방향을 조절하는 태도";
-            },
-        }),
-        (error) => {
-            const codes = error.validation.issues.map((issue) => issue.code);
-            return codes.includes("under_min_bytes") && codes.includes("incomplete_sentence");
+    const result = await generateWithSilentValidation({
+        prompt: "원본 프롬프트",
+        minTargetBytes: 900,
+        minTargetChars: 0,
+        targetChars: 490,
+        mode: "record",
+        maxRepairAttempts: 1,
+        generateOnce: async () => {
+            calls += 1;
+            return "공의 궤적을 예측하고 드리블 방향을 조절하는 태도";
         },
-    );
+    });
 
     assert.equal(calls, 2);
+    assert.equal(result.acceptedWithValidationWarning, true);
+    assert.equal(result.text, "공의 궤적을 예측하고 드리블 방향을 조절하는 태도.");
+    assert.deepEqual(
+        result.validation.issues.map((issue) => issue.code),
+        ["under_min_bytes", "incomplete_sentence"],
+    );
 });

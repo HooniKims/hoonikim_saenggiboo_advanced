@@ -105,6 +105,20 @@ test("all generation pages route Solar Pro 2 through the Upstage API", () => {
     }
 });
 
+test("all generation pages show provider-neutral generation status copy", () => {
+    for (const relativePath of [
+        "app/gwasetuk/page.js",
+        "app/club/page.js",
+        "app/behavior/page.js",
+        "app/letter/page.js",
+    ]) {
+        const source = readPage(relativePath);
+        assert.match(source, /const generationStatusText = "AI로 생성 중\.\.\.";/);
+        assert.doesNotMatch(source, /(?:NVIDIA|Upstage|OpenAI).*생성 중\.\.\./);
+        assert.doesNotMatch(source, /취소해도.*비용.*청구/);
+    }
+});
+
 test("model guidance recommends Solar when the default local model is slow or errors", () => {
     const source = readPage("components/OpenAIKeyControl.js");
 
@@ -120,12 +134,24 @@ test("gwasetuk gives Solar an activity-first equal-allocation plan", () => {
     assert.match(source, /모든 활동을 반영한 뒤에만 남은 분량/);
 });
 
-test("gwasetuk repairs missing Solar content and uses a byte-realistic character ceiling", () => {
+test("gwasetuk asks Solar to repair missing content and uses a byte-realistic character ceiling", () => {
     const source = readPage("app/gwasetuk/page.js");
 
-    assert.match(source, /expandSolarPreviousText/);
-    assert.match(source, /restoreMissingSolarActivities/);
+    assert.match(source, /requiredContentGroups:\s*solarRequiredContentGroups/);
+    assert.match(source, /fetchUpstageCompletion\(\{ prompt: nextPrompt/);
     assert.match(source, /Math\.ceil\(targetBytes \/ 2\.7\)/);
+});
+
+test("gwasetuk sends every Solar repair attempt back to Upstage", () => {
+    // Given
+    const source = readPage("app/gwasetuk/page.js");
+
+    // When
+    const generationFlow = source.match(/generateWithSilentValidation\(\{[\s\S]*?\n\s*\}\);/)?.[0] || "";
+
+    // Then
+    assert.match(generationFlow, /isUpstageSelected[\s\S]*?fetchUpstageCompletion\(\{ prompt: nextPrompt/);
+    assert.doesNotMatch(generationFlow, /Promise\.resolve\((?:restoreMissingSolarActivities|expandSolarPreviousText)/);
 });
 
 test("club prompt applies advanced content-quality guidance only for high school", () => {
