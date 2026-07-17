@@ -359,7 +359,16 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
     const missingBytes = Math.max(0, minAllowedBytes - currentBytes);
     const issueCodes = new Set((issues || []).map((issue) => issue.code));
     const isLengthShortfall = issueCodes.has("under_min_bytes") || issueCodes.has("under_min_chars");
-    const visibleRange = getByteTargetVisibleRange(maxAllowed, minAllowedBytes);
+    const hasMissingRequiredContent = issueCodes.has("missing_required_content");
+    const shouldPreserveShortfallText = preserveTextOnLengthRepair
+        && isLengthShortfall
+        && !hasMissingRequiredContent;
+    const visibleRange = shouldPreserveShortfallText
+        ? {
+            min: Math.max(1, Math.ceil(missingBytes / 3)),
+            max: Math.max(1, Math.ceil(missingBytes / 2)),
+        }
+        : getByteTargetVisibleRange(maxAllowed, minAllowedBytes);
     const byteShortfallText = minAllowedBytes > 0 && missingBytes > 0
         ? `\n[Byte shortfall]\n- Current bytes: ${currentBytes}byte\n- Missing bytes: ${missingBytes}byte\n- Write ${visibleRange.min}-${visibleRange.max} Korean visible characters for the ${maxAllowedBytes || maxAllowed}byte setting.\n- Add enough concrete Korean content while staying under ${maxAllowedBytes || maxAllowed}byte.\n`
         : "";
@@ -387,10 +396,6 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
         : "\n- A/B/C/D/E, [A], (A), A등급, 활동1[A] 같은 등급 기호와 라벨은 내부 기준일 뿐이며 본문에 출력하지 않음";
     const sentenceSpacingInstruction = "\n- 문장이 끝나면 반드시 마침표(.)를 찍고 한 칸 띄움. 마지막 문장은 마침표(.)를 찍고 바로 종료";
 
-    const hasMissingRequiredContent = issueCodes.has("missing_required_content");
-    const shouldPreserveShortfallText = preserveTextOnLengthRepair
-        && isLengthShortfall
-        && !hasMissingRequiredContent;
     const shortfallRewriteInstruction = shouldPreserveShortfallText
         ? `기존 본문은 시스템이 유지합니다. 기존 본문을 다시 출력하거나 요약하지 말고, 핵심 키워드의 다른 관찰 관점과 성취 수준을 담아 뒤에 추가할 새 문장만 반환하세요.`
         : hasMissingRequiredContent

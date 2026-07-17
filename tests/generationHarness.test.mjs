@@ -833,6 +833,23 @@ test("buildRepairPrompt asks for only new observations during short-output repai
     assert.match(prompt, /추가할 새 문장만 반환/);
 });
 
+test("buildRepairPrompt sizes an appended Solar sentence from the byte shortfall", () => {
+    const prompt = buildRepairPrompt({
+        text: `${"가".repeat(150)}함.`,
+        issues: [{ code: "under_min_bytes", message: "목표 byte 미달" }],
+        sourcePrompt: "환경 문제 탐구",
+        targetChars: 236,
+        maxTargetBytes: 600,
+        minTargetBytes: 510,
+        mode: "record",
+        preserveTextOnLengthRepair: true,
+    });
+
+    assert.match(prompt, /Missing bytes: 56byte/);
+    assert.match(prompt, /19-28 Korean visible characters/);
+    assert.doesNotMatch(prompt, /204-236 Korean visible characters/);
+});
+
 test("buildRepairPrompt keeps the existing repair behavior by default", () => {
     const prompt = buildRepairPrompt({
         text: "자료를 조사하고 결과를 발표함.",
