@@ -12,6 +12,7 @@ import { fetchUpstageCompletion } from "../../utils/upstageFetch";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import { generateWithSilentValidation } from "../../utils/generationHarness";
+import { generateWithLocalSolarFallback } from "../../utils/localSolarFallback";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { fetchSearchContext } from "../../utils/searchContextFetch";
 import { limitActivitiesByTargetChars, mergeNumberedIndividualActivities, shouldSelectRandomFourActivities } from "../../utils/activitySelection";
@@ -99,6 +100,7 @@ export default function GwasetukPage() {
     } = useOpenAIKey();
     const isNvidiaSelected = isNvidiaModel(selectedModel);
     const isUpstageSelected = isUpstageModel(selectedModel);
+    const isLocalFallbackEligible = !isNvidiaSelected && !isUpstageSelected && !appliedOpenAIKey;
     const generationStatusText = "AI로 생성 중...";
 
     useEffect(() => {
@@ -522,7 +524,7 @@ ${lengthInstruction}
         // Activity Selection Logic based on Target Chars
         selectedActivityEntries = limitActivitiesByTargetChars(selectedActivityEntries, targetChars);
         // 350자 초과: 모든 활동 사용
-        const solarRequiredContentGroups = isUpstageSelected
+        const solarRequiredContentGroups = isUpstageSelected || isLocalFallbackEligible
             ? [
                 ...selectedActivityEntries.map((entry, index) => ({
                     label: `활동${index + 1}`,
@@ -565,19 +567,43 @@ ${lengthInstruction}
                 promptModel,
                 searchContext
             );
-            const generationResult = await generateWithSilentValidation({
-                prompt,
-                acceptLengthOnlyResult: !isUpstageSelected,
-                preserveTextOnLengthRepair: isUpstageSelected,
-                stripExpandedGradeLabels: isUpstageSelected,
-                requiredContentGroups: solarRequiredContentGroups,
+            const validationOptions = {
                 maxTargetBytes: targetBytes,
                 minTargetBytes,
                 targetChars: generationTargetChars,
                 mode: "record",
                 forbiddenTerms: [subjectName, student.name],
-                maxRepairAttempts: isUpstageSelected ? 4 : 2,
-                generateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
+                requiredContentGroups: solarRequiredContentGroups,
+            };
+            const runLocalGeneration = (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
+                attempt,
+                previousValidation,
+                provider: "local",
+                setProgress: (message) => updateStudent(student.id, "progress", message),
+                run: () => fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars: generationTargetChars }),
+            });
+            const generationResult = isLocalFallbackEligible
+                ? await generateWithLocalSolarFallback({
+                    prompt,
+                    validationOptions,
+                    localGenerateOnce: runLocalGeneration,
+                    solarGenerateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
+                        attempt,
+                        previousValidation,
+                        provider: "upstage",
+                        setProgress: (message) => updateStudent(student.id, "progress", message),
+                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars: generationTargetChars }),
+                    }),
+                })
+                : await generateWithSilentValidation({
+                    prompt,
+                    acceptLengthOnlyResult: !isUpstageSelected,
+                    preserveTextOnLengthRepair: isUpstageSelected,
+                    stripExpandedGradeLabels: isUpstageSelected,
+                    requiredContentGroups: solarRequiredContentGroups,
+                    ...validationOptions,
+                    maxRepairAttempts: isUpstageSelected ? 4 : 2,
+                    generateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
                     attempt,
                     previousValidation,
                     provider: getGenerationProvider({ isNvidiaSelected, isUpstageSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
@@ -589,8 +615,8 @@ ${lengthInstruction}
                         : appliedOpenAIKey
                             ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions, apiKey: appliedOpenAIKey, targetChars: generationTargetChars, model: selectedOpenAIModel })
                             : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars: generationTargetChars }),
-                }),
-            });
+                    }),
+                });
 
             if (generationResult.repaired) {
                 console.log(`[내부 검증] 학생 ${student.id}: ${generationResult.attempts}회 시도 후 규칙 보정`);

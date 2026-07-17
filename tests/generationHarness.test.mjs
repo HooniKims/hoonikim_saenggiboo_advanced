@@ -61,6 +61,19 @@ test("validateGeneratedText detects a missing required activity or grade express
     assert.equal(validation.issues.filter((issue) => issue.code === "missing_required_content").length, 2);
 });
 
+test("validateGeneratedText accepts activity evidence words separated within one sentence", () => {
+    const validation = validateGeneratedText(
+        "토론 과정에서 주장을 뒷받침하는 근거를 체계적으로 구성함.",
+        {
+            mode: "record",
+            targetChars: 100,
+            requiredContentGroups: [{ label: "활동1", terms: ["토론 근거"] }],
+        },
+    );
+
+    assert.equal(validation.ok, true);
+});
+
 test("buildRepairPrompt names every missing required content group", () => {
     const prompt = buildRepairPrompt({
         text: "기후 변화가 생태계에 미치는 영향을 정리함.",
@@ -598,6 +611,15 @@ test("generateWithSilentValidation formats missing sentence periods and spaces",
     assert.equal(letterResult.validation.ok, true);
 });
 
+test("finalizeGeneratedText does not split ordinary words ending in 다 or 요", () => {
+    const source = "기후변화의 주요 원인을 분석하고 대안을 고려하기보다 실행 가능성을 먼저 검토함.";
+    const result = finalizeGeneratedText(source, 300, 1000, "record");
+
+    assert.doesNotMatch(result, /주요\. 원인/);
+    assert.doesNotMatch(result, /고려하기보다\. 실행/);
+    assert.equal(result, source);
+});
+
 test("generateWithSilentValidation expands letter output before using the length-only fallback", async () => {
     const result = await generateWithSilentValidation({
         prompt: "가정통신문을 작성하세요.",
@@ -1065,4 +1087,24 @@ test("generateWithSilentValidation returns short incomplete output after repair 
         result.validation.issues.map((issue) => issue.code),
         ["under_min_bytes", "incomplete_sentence"],
     );
+});
+
+test("generateWithSilentValidation keeps the best invalid candidate when requested", async () => {
+    const outputs = [
+        "자료 조사 활동에서 핵심 정보를 선별하여 충실히 수행함. 조사 근거를 비교하고 내용을 체계적으로 정리함.",
+        "자료 조사함.",
+    ];
+
+    const result = await generateWithSilentValidation({
+        prompt: "자료 조사",
+        generateOnce: async () => outputs.shift(),
+        targetChars: 300,
+        minTargetBytes: 500,
+        maxTargetBytes: 600,
+        maxRepairAttempts: 1,
+        preferBestCandidateOnFailure: true,
+        acceptLengthOnlyResult: false,
+    });
+
+    assert.match(result.text, /핵심 정보를 선별하여 충실히 수행함/);
 });

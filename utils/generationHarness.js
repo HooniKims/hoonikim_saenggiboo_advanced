@@ -8,7 +8,7 @@ import {
 } from "./textProcessor.js";
 
 const RECORD_ENDINGS = "함|음|임|됨|봄|옴|줌|춤|움|늠|름|남|냄|김|킴|짐|님|감|침|보임|드러남|나타남|돋보임|지님|뛰어남";
-const RECORD_SENTENCE_BOUNDARY_ENDINGS = `${RECORD_ENDINGS}|다|요|까|니`;
+const RECORD_SENTENCE_BOUNDARY_ENDINGS = `${RECORD_ENDINGS}|(?<!보)다`;
 const LETTER_ENDINGS = "습니다|합니다|입니다|됩니다|바랍니다|드립니다|좋겠습니다|필요합니다|응원합니다";
 const RECORD_ENDING_PATTERN = new RegExp(`(?:${RECORD_ENDINGS})\\.\\s*$`);
 const LETTER_ENDING_PATTERN = new RegExp(`(?:${LETTER_ENDINGS})\\.\\s*$`);
@@ -132,6 +132,25 @@ function hasOnlyNonBlockingGenerationIssues(issues, mode = "record") {
     return issues.length > 0 && issues.every((issue) => nonBlockingIssueCodes.has(issue.code));
 }
 
+function isBetterGeneratedCandidate(candidate, currentBest, minTargetBytes, mode) {
+    if (!currentBest) return true;
+    const nonBlockingIssueCodes = mode === "letter"
+        ? NON_BLOCKING_LETTER_ISSUE_CODES
+        : NON_BLOCKING_GENERATION_ISSUE_CODES;
+    const getRank = ({ text, validation }) => {
+        const missingContent = validation.issues.filter((issue) => issue.code === "missing_required_content").length;
+        const blockingIssues = validation.issues.filter((issue) => !nonBlockingIssueCodes.has(issue.code)).length;
+        const byteLength = getUtf8ByteLength(text);
+        const byteGap = Math.max(0, Number(minTargetBytes || 0) - byteLength);
+        return [missingContent, blockingIssues, byteGap, -byteLength];
+    };
+    const candidateRank = getRank(candidate);
+    const bestRank = getRank(currentBest);
+    return candidateRank.some((value, index) => value !== bestRank[index]
+        && candidateRank.slice(0, index).every((rankValue, rankIndex) => rankValue === bestRank[rankIndex])
+        && value < bestRank[index]);
+}
+
 function getForbiddenTerms(forbiddenTerms) {
     return (forbiddenTerms || [])
         .map((term) => String(term || "").trim())
@@ -151,6 +170,19 @@ function getRequiredContentGroups(groups) {
             terms: getRuleTerms(group?.terms),
         }))
         .filter((group) => group.terms.length > 0);
+}
+
+function hasRequiredContentEvidence(text, term) {
+    const source = String(text || "");
+    const evidence = String(term || "").trim();
+    if (!evidence) return false;
+    if (source.includes(evidence)) return true;
+
+    const words = evidence.split(/\s+/).filter((word) => word.length >= 2);
+    if (words.length < 2) return false;
+    return source
+        .split(/[.!?]/)
+        .some((sentence) => words.every((word) => sentence.includes(word)));
 }
 
 function getObjectParticle(term) {
@@ -262,7 +294,7 @@ export function validateGeneratedText(text, options = {}) {
 
 
     for (const group of getRequiredContentGroups(requiredContentGroups)) {
-        if (!group.terms.some((term) => trimmed.includes(term))) {
+        if (!group.terms.some((term) => hasRequiredContentEvidence(trimmed, term))) {
             addIssue(issues, "missing_required_content", `${group.label}: ${group.terms.join(" / ")}`);
         }
     }
@@ -742,6 +774,7 @@ export async function generateWithSilentValidation({
     requiredAdviceDomains = false,
     requiredContentGroups = [],
     preserveTextOnLengthRepair = false,
+    preferBestCandidateOnFailure = false,
     stripExpandedGradeLabels = false,
 }) {
     if (typeof generateOnce !== "function") {
@@ -751,6 +784,7 @@ export async function generateWithSilentValidation({
     let nextPrompt = prompt;
     let lastText = "";
     let lastValidation = null;
+    let bestCandidate = null;
     const hasByteTarget = Number(minTargetBytes) > 0 || Number(maxTargetBytes) > 0;
     const effectiveMinTargetChars = minTargetChars ?? (hasByteTarget ? 0 : getMinimumTargetChars(targetChars));
 
@@ -800,6 +834,10 @@ export async function generateWithSilentValidation({
             requiredContentGroups,
             preserveTextOnLengthRepair,
         });
+        const candidate = { text, validation };
+        if (preferBestCandidateOnFailure && isBetterGeneratedCandidate(candidate, bestCandidate, minTargetBytes, mode)) {
+            bestCandidate = candidate;
+        }
 
         if (validation.ok) {
             return {
@@ -882,22 +920,29 @@ export async function generateWithSilentValidation({
         };
     }
 
-    if (sanitized) {
+    const sanitizedCandidate = { text: sanitized, validation };
+    if (preferBestCandidateOnFailure && isBetterGeneratedCandidate(sanitizedCandidate, bestCandidate, minTargetBytes, mode)) {
+        bestCandidate = sanitizedCandidate;
+    }
+    const fallbackText = bestCandidate?.text || sanitized;
+    const fallbackValidation = bestCandidate?.validation || validation;
+
+    if (fallbackText) {
         return {
-            text: sanitized,
+            text: fallbackText,
             attempts: maxRepairAttempts + 1,
             repaired: maxRepairAttempts > 0,
-            validation,
+            validation: fallbackValidation,
             acceptedWithValidationWarning: true,
         };
     }
 
-    const issueText = validation.issues
+    const issueText = fallbackValidation.issues
         .map((issue) => `${issue.message}${issue.detail ? `(${issue.detail})` : ""}`)
         .join(", ");
     const error = new Error(`내부 검증 실패: ${issueText || "규칙 미충족"}`);
-    error.validation = validation;
-    error.text = sanitized;
+    error.validation = fallbackValidation;
+    error.text = fallbackText;
     error.attempts = maxRepairAttempts + 1;
     throw error;
 }

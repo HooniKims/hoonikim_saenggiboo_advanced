@@ -105,6 +105,30 @@ test("all generation pages route Solar Pro 2 through the Upstage API", () => {
     }
 });
 
+test("all generation pages automatically fall back from local models to Solar", () => {
+    for (const relativePath of [
+        "app/gwasetuk/page.js",
+        "app/club/page.js",
+        "app/behavior/page.js",
+        "app/letter/page.js",
+    ]) {
+        const source = readPage(relativePath);
+        assert.match(source, /import \{ generateWithLocalSolarFallback \} from "\.\.\/\.\.\/utils\/localSolarFallback"/);
+        assert.match(source, /const isLocalFallbackEligible = !isNvidiaSelected && !isUpstageSelected && !appliedOpenAIKey;/);
+        assert.match(source, /generateWithLocalSolarFallback\(\{/);
+        assert.match(source, /solarGenerateOnce:[\s\S]*?fetchUpstageCompletion/);
+    }
+});
+
+test("subject and club local fallback validates every selected activity", () => {
+    for (const relativePath of ["app/gwasetuk/page.js", "app/club/page.js"]) {
+        const source = readPage(relativePath);
+        assert.match(source, /const solarRequiredContentGroups = isUpstageSelected \|\| isLocalFallbackEligible/);
+        assert.match(source, /selectedActivityEntries\.map\(\(entry, index\) => \(\{/);
+        assert.match(source, /requiredContentGroups:\s*solarRequiredContentGroups/);
+    }
+});
+
 test("all generation pages show provider-neutral generation status copy", () => {
     for (const relativePath of [
         "app/gwasetuk/page.js",

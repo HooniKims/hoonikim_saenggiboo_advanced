@@ -12,6 +12,7 @@ import { fetchUpstageCompletion } from "../../utils/upstageFetch";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import { generateWithSilentValidation } from "../../utils/generationHarness";
+import { generateWithLocalSolarFallback } from "../../utils/localSolarFallback";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { buildLetterRuleTermInstruction, buildLetterVariationInstruction, buildShuffledKeywordContext, getLetterBannedTerms, getLetterRequiredTerms } from "../../utils/letterKeywords";
 import { fetchSearchContext } from "../../utils/searchContextFetch";
@@ -43,6 +44,7 @@ export default function LetterPage() {
     } = useOpenAIKey();
     const isNvidiaSelected = isNvidiaModel(selectedModel);
     const isUpstageSelected = isUpstageModel(selectedModel);
+    const isLocalFallbackEligible = !isNvidiaSelected && !isUpstageSelected && !appliedOpenAIKey;
     const generationStatusText = "AI로 생성 중...";
 
     // Letter Specific State
@@ -270,11 +272,7 @@ ${lengthInstruction}
             }
 
             const prompt = generatePrompt(targetChars, searchContext);
-            const generationResult = await generateWithSilentValidation({
-                prompt,
-                acceptLengthOnlyResult: !isUpstageSelected,
-                preserveTextOnLengthRepair: isUpstageSelected,
-                stripExpandedGradeLabels: isUpstageSelected,
+            const validationOptions = {
                 maxTargetBytes: targetBytes,
                 minTargetBytes,
                 targetChars,
@@ -283,8 +281,35 @@ ${lengthInstruction}
                 requiredTerms: getLetterRequiredTerms({ season, keywords }),
                 bannedTerms: getLetterBannedTerms(season),
                 requiredAdviceDomains: true,
-                maxRepairAttempts: 2,
-                generateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
+            };
+            const runLocalGeneration = (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
+                attempt,
+                previousValidation,
+                provider: "local",
+                setProgress: (message) => updateStudent(student.id, "progress", message),
+                run: () => fetchStream({ prompt: nextPrompt, model: selectedModel, targetChars, outputType: "letter" }),
+            });
+            const generationResult = isLocalFallbackEligible
+                ? await generateWithLocalSolarFallback({
+                    prompt,
+                    validationOptions,
+                    localGenerateOnce: runLocalGeneration,
+                    solarGenerateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
+                        attempt,
+                        previousValidation,
+                        provider: "upstage",
+                        setProgress: (message) => updateStudent(student.id, "progress", message),
+                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, targetChars, outputType: "letter" }),
+                    }),
+                })
+                : await generateWithSilentValidation({
+                    prompt,
+                    acceptLengthOnlyResult: !isUpstageSelected,
+                    preserveTextOnLengthRepair: isUpstageSelected,
+                    stripExpandedGradeLabels: isUpstageSelected,
+                    ...validationOptions,
+                    maxRepairAttempts: 2,
+                    generateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
                     attempt,
                     previousValidation,
                     provider: getGenerationProvider({ isNvidiaSelected, isUpstageSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
@@ -296,8 +321,8 @@ ${lengthInstruction}
                         : appliedOpenAIKey
                             ? fetchOpenAICompletion({ prompt: nextPrompt, apiKey: appliedOpenAIKey, targetChars, model: selectedOpenAIModel, outputType: "letter" })
                             : fetchStream({ prompt: nextPrompt, model: selectedModel, targetChars, outputType: "letter" }),
-                }),
-            });
+                    }),
+                });
 
             if (generationResult.repaired) {
                 console.log(`[내부 검증] 학생 ${student.id}: ${generationResult.attempts}회 시도 후 규칙 보정`);

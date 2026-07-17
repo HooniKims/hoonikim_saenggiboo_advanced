@@ -12,6 +12,7 @@ import { fetchUpstageCompletion } from "../../utils/upstageFetch";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import { generateWithSilentValidation } from "../../utils/generationHarness";
+import { generateWithLocalSolarFallback } from "../../utils/localSolarFallback";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { fetchSearchContext } from "../../utils/searchContextFetch";
 import { getBehaviorHighSchoolQualityGuidance } from "../../utils/recordQualityGuidance";
@@ -46,6 +47,7 @@ export default function BehaviorPage() {
     } = useOpenAIKey();
     const isNvidiaSelected = isNvidiaModel(selectedModel);
     const isUpstageSelected = isUpstageModel(selectedModel);
+    const isLocalFallbackEligible = !isNvidiaSelected && !isUpstageSelected && !appliedOpenAIKey;
     const generationStatusText = "AI로 생성 중...";
 
     // Auto-resize textarea
@@ -284,18 +286,41 @@ ${lengthInstruction}
             }
 
             const prompt = generatePrompt(student, targetChars, searchContext);
-            const generationResult = await generateWithSilentValidation({
-                prompt,
-                acceptLengthOnlyResult: !isUpstageSelected,
-                preserveTextOnLengthRepair: isUpstageSelected,
-                stripExpandedGradeLabels: isUpstageSelected,
+            const validationOptions = {
                 maxTargetBytes: targetBytes,
                 minTargetBytes,
                 targetChars,
                 mode: "record",
                 forbiddenTerms: [student.name],
-                maxRepairAttempts: isUpstageSelected ? 4 : 2,
-                generateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
+            };
+            const runLocalGeneration = (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
+                attempt,
+                previousValidation,
+                provider: "local",
+                setProgress: (message) => updateStudent(student.id, "progress", message),
+                run: () => fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars }),
+            });
+            const generationResult = isLocalFallbackEligible
+                ? await generateWithLocalSolarFallback({
+                    prompt,
+                    validationOptions,
+                    localGenerateOnce: runLocalGeneration,
+                    solarGenerateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
+                        attempt,
+                        previousValidation,
+                        provider: "upstage",
+                        setProgress: (message) => updateStudent(student.id, "progress", message),
+                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars }),
+                    }),
+                })
+                : await generateWithSilentValidation({
+                    prompt,
+                    acceptLengthOnlyResult: !isUpstageSelected,
+                    preserveTextOnLengthRepair: isUpstageSelected,
+                    stripExpandedGradeLabels: isUpstageSelected,
+                    ...validationOptions,
+                    maxRepairAttempts: isUpstageSelected ? 4 : 2,
+                    generateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
                     attempt,
                     previousValidation,
                     provider: getGenerationProvider({ isNvidiaSelected, isUpstageSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
@@ -307,8 +332,8 @@ ${lengthInstruction}
                         : appliedOpenAIKey
                             ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions, apiKey: appliedOpenAIKey, targetChars, model: selectedOpenAIModel })
                             : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars }),
-                }),
-            });
+                    }),
+                });
 
             if (generationResult.repaired) {
                 console.log(`[내부 검증] 학생 ${student.id}: ${generationResult.attempts}회 시도 후 규칙 보정`);
