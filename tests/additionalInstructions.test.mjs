@@ -266,11 +266,103 @@ test("local model list only exposes LM Studio-backed Gemma models", async () => 
     assert.equal(requests.every((request) => request.body.reasoning_effort === "none"), true);
 });
 
-test("larger LM Studio local models get expanded max token budget", () => {
+test("large LM Studio models reserve only the output tokens needed for the requested length", () => {
     assert.equal(getMaxTokensForLocalModel("gemma4:e2b", 589), 2003);
     assert.equal(getMaxTokensForLocalModel("gemma4:e4b", 589), 3072);
-    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 589), 4096);
-    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-26b-a4b-it-q4ks", 589), 4096);
+    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 236), 768);
+    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 393), 1024);
+    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 589), 1536);
+    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 650), 2048);
+    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-26b-a4b-it-q4ks", 589), 1536);
+});
+
+test("fetchStream retries a context overflow once with examples removed and core activities preserved", async () => {
+    const calls = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, options) => {
+        const body = JSON.parse(options.body);
+        calls.push(body);
+        if (calls.length === 1) {
+            return Response.json({
+                error: "Engine protocol predict request returned 400: request exceeds the available context size (8192 tokens)",
+            }, { status: 500 });
+        }
+        return Response.json({
+            choices: [{
+                message: { content: "자료 조사 활동에서 핵심 정보를 분석하고 토론 활동에서 C 수준으로 의견을 제시함." },
+                finish_reason: "stop",
+            }],
+        });
+    };
+
+    try {
+        const result = await fetchStream({
+            prompt: `[핵심 활동]\n- 자료 조사: A(매우 잘함)\n- 토론: C(보통)\n\n<좋은 예시>\n${"불필요한 예시 문장 ".repeat(1000)}`,
+            additionalInstructions: "입력된 성취수준을 유지",
+            model: "lmstudio:gemma-4-12b-it",
+            targetChars: 333,
+        });
+        assert.match(result, /자료 조사 활동/);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+
+    assert.equal(calls.length, 2);
+    assert.match(calls[1].messages[1].content, /자료 조사: A\(매우 잘함\)/);
+    assert.match(calls[1].messages[1].content, /토론: C\(보통\)/);
+    assert.match(calls[1].messages[1].content, /입력된 성취수준을 유지/);
+    assert.doesNotMatch(calls[1].messages[1].content, /불필요한 예시 문장/);
+    assert.ok(calls[1].messages[1].content.length < calls[0].messages[1].content.length / 2);
+});
+
+test("fetchStream stops after one compact retry when the context still exceeds the limit", async () => {
+    let callCount = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+        callCount += 1;
+        return Response.json({
+            error: { message: "request exceeds the available context size (8192 tokens)" },
+        }, { status: 500 });
+    };
+
+    try {
+        await assert.rejects(
+            fetchStream({
+                prompt: "반드시 유지해야 하는 매우 긴 활동 내용",
+                model: "lmstudio:gemma-4-12b-it",
+                targetChars: 333,
+            }),
+            /exceeds the available context size/,
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+
+    assert.equal(callCount, 2);
+});
+
+test("fetchStream does not retry unrelated local server errors", async () => {
+    let callCount = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+        callCount += 1;
+        return Response.json({ error: "model is unavailable" }, { status: 503 });
+    };
+
+    try {
+        await assert.rejects(
+            fetchStream({
+                prompt: "활동 내용을 작성하세요.",
+                model: "lmstudio:gemma-4-12b-it",
+                targetChars: 333,
+            }),
+            /model is unavailable/,
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+
+    assert.equal(callCount, 1);
 });
 
 test("AI model list exposes Upstage Solar Pro 2 as a server-backed option", () => {

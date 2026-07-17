@@ -74,7 +74,31 @@ export function getMaxTokensForLocalModel(modelId, targetChars) {
     const modelKey = String(modelId || "").toLowerCase();
     const isLmStudioLargeModel = modelKey.startsWith("lmstudio:") && (modelKey.includes("12b") || modelKey.includes("26b"));
     if (modelKey === "gemma4:e4b") return Math.max(3072, baseTokens);
-    return isLmStudioLargeModel ? Math.max(4096, baseTokens) : baseTokens;
+    if (!isLmStudioLargeModel) return baseTokens;
+
+    const requestedChars = Number(targetChars) || 0;
+    if (requestedChars <= 236) return 768;
+    if (requestedChars <= 393) return 1024;
+    if (requestedChars <= 589) return 1536;
+    return 2048;
+}
+
+function isContextLimitError(error) {
+    const message = String(error?.message || error || "").toLowerCase();
+    return message.includes("context size has been exceeded")
+        || message.includes("exceeds the available context size")
+        || message.includes("exceed_context_size_error");
+}
+
+function getCompactContextRetryPrompt(prompt, additionalInstructions, targetChars) {
+    const compactPrompt = String(prompt || "")
+        .replace(/<좋은 예시>[\s\S]*?(?:<\/좋은 예시>|$)/gi, "")
+        .replace(/\[좋은 예시\][\s\S]*?(?=\n\s*\[[^\n]+\]|$)/gi, "")
+        .replace(/\[학생 개별 활동 내용 기반 웹 검색 보강 자료\][\s\S]*?(?=\n\s*\[[^\n]+\]|$)/gi, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    const extraRule = String(additionalInstructions || "").trim();
+    return `[컨텍스트 압축 재시도] 입력된 활동과 성취수준을 모두 유지하여 ${targetChars}자 이하로 작성하세요. 예시를 모방하거나 새로운 사실을 만들지 마세요.\n\n${compactPrompt}${extraRule ? `\n\n[추가 규칙]\n${extraRule}` : ""}`;
 }
 
 /**
@@ -123,7 +147,9 @@ async function callOllamaAPI(systemMessage, userPrompt, model, targetChars) {
         let errorMessage = `로컬 LLM 서버 오류 (${res.status})`;
         try {
             const errorData = await res.json();
-            errorMessage = errorData.error || errorMessage;
+            errorMessage = typeof errorData.error === "string"
+                ? errorData.error
+                : errorData.error?.message || errorMessage;
         } catch {
             // 무시
         }
@@ -228,8 +254,19 @@ export async function fetchStream(bodyData) {
         finalPrompt = prefix + prompt + suffix;
     }
 
+    const compactRetryPrompt = getCompactContextRetryPrompt(prompt, additionalInstructions, targetChars);
+    const callWithContextRetry = async (requestPrompt) => {
+        try {
+            return await callOllamaAPI(systemMessage, requestPrompt, localModel, targetChars);
+        } catch (error) {
+            if (!isContextLimitError(error)) throw error;
+            console.warn(`[Local LLM] context limit exceeded; retrying once with compact prompt model=${localModel}`);
+            return callOllamaAPI(systemMessage, compactRetryPrompt, localModel, targetChars);
+        }
+    };
+
     // 1차 시도
-    let content = await callOllamaAPI(systemMessage, finalPrompt, localModel, targetChars);
+    let content = await callWithContextRetry(finalPrompt);
 
     if (!content.trim()) {
         throw new Error("AI 응답이 비어있습니다.");
@@ -257,7 +294,7 @@ ${finalPrompt}
 [불완전한 텍스트]
 ${content}`;
 
-        const retryContent = await callOllamaAPI(systemMessage, retryPrompt, localModel, targetChars);
+        const retryContent = await callWithContextRetry(retryPrompt);
 
         if (retryContent.trim() && endsWithCompleteSentence(retryContent, outputType)) {
             content = retryContent;
