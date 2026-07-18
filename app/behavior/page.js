@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { Trash2, Download, Wand2, Users, UserX, Copy, Check } from "lucide-react";
 import * as XLSX from "xlsx";
 import { writeExcel } from "../../utils/excel";
-import { getCharacterGuideline, getMinimumTargetBytes, getUtf8ByteLength, normalizeTargetBytes, normalizeTargetChars } from "../../utils/textProcessor";
+import { getCharacterGuideline, getMinimumTargetBytes, getUtf8ByteLength } from "../../utils/textProcessor";
 import { fetchStream, AVAILABLE_MODELS, DEFAULT_MODEL, getModelOptionLabel, isNvidiaModel, isUpstageModel } from "../../utils/streamFetch";
 import { fetchNvidiaCompletion } from "../../utils/nvidiaFetch";
 import { fetchOpenAICompletion } from "../../utils/openAIFetch";
@@ -16,6 +16,7 @@ import { generateWithLocalSolarFallback } from "../../utils/localSolarFallback";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { fetchSearchContext } from "../../utils/searchContextFetch";
 import { getBehaviorHighSchoolQualityGuidance } from "../../utils/recordQualityGuidance";
+import { getBehaviorLengthTargets } from "../../utils/behaviorLength";
 
 export default function BehaviorPage() {
     // State
@@ -27,7 +28,7 @@ export default function BehaviorPage() {
     const [students, setStudents] = useState([{ id: 1, name: "", observation: "", result: "", status: "idle", progress: "" }]);
     const [schoolLevel, setSchoolLevel] = useState("middle");
     const [additionalInstructions, setAdditionalInstructions] = useState("");
-    const [textLength, setTextLength] = useState("1500");
+    const [textLength, setTextLength] = useState("900");
     const [manualLength, setManualLength] = useState("");
     const [isGenerating, setIsGenerating] = useState(false);
     const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
@@ -201,7 +202,7 @@ export default function BehaviorPage() {
 
     // 생성 결과 검증과 후처리는 generationHarness에서 내부 처리됨
 
-    const generatePrompt = (student, targetChars, searchContext = "") => {
+    const generatePrompt = (student, targetChars, targetBytes, searchContext = "") => {
         let minChar, maxChar;
         if (targetChars === 200) {
             minChar = 150; maxChar = 200;
@@ -213,7 +214,6 @@ export default function BehaviorPage() {
         }
 
         // 글자수 지침은 공통 유틸에서 생성
-        const targetBytes = normalizeTargetBytes(textLength, manualLength);
         const lengthInstruction = getCharacterGuideline(targetChars, targetBytes, getMinimumTargetBytes(targetBytes));
         const observationText = student.observation ? `학생 행동 관찰 내용: ${student.observation}` : "학생 행동 관찰 내용: 일반적인 모범 학생의 특성 (구체적인 입력 없음)";
         const searchContextText = searchContext.trim()
@@ -260,9 +260,7 @@ ${lengthInstruction}
         // However, to be consistent with "AI generation", we can generate generic good behavior if empty.
         // Let's stick to the prompt logic which handles empty observation.
 
-        const targetBytes = normalizeTargetBytes(textLength, manualLength);
-        const targetChars = normalizeTargetChars(textLength, manualLength);
-        const minTargetBytes = getMinimumTargetBytes(targetBytes);
+        const { targetBytes, targetChars, minTargetBytes } = getBehaviorLengthTargets(textLength, manualLength);
 
         try {
             updateStudent(student.id, "status", "loading");
@@ -285,7 +283,7 @@ ${lengthInstruction}
                 }
             }
 
-            const prompt = generatePrompt(student, targetChars, searchContext);
+            const prompt = generatePrompt(student, targetChars, targetBytes, searchContext);
             const validationOptions = {
                 maxTargetBytes: targetBytes,
                 minTargetBytes,
@@ -503,8 +501,7 @@ ${lengthInstruction}
                                 onChange={(e) => setTextLength(e.target.value)}
                                 className="form-select"
                             >
-                                <option value="1500">1500byte (한글 약 490자)</option>
-                                <option value="1000">1000byte (한글 약 333자)</option>
+                                <option value="900">900byte (한글 약 350자)</option>
                                 <option value="600">600byte (한글 약 200자)</option>
                                 <option value="manual">직접 입력</option>
                             </select>
@@ -513,7 +510,8 @@ ${lengthInstruction}
                                     type="number"
                                     value={manualLength}
                                     onChange={(e) => setManualLength(e.target.value)}
-                                    placeholder="글자수 입력"
+                                    placeholder="byte 수 입력 (최대 900)"
+                                    max="900"
                                     className="form-input mt-2"
                                 />
                             )}
