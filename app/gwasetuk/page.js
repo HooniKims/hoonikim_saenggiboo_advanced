@@ -16,6 +16,7 @@ import { generateWithLocalSolarFallback } from "../../utils/localSolarFallback";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { fetchSearchContext } from "../../utils/searchContextFetch";
 import { limitActivitiesByTargetChars, mergeNumberedIndividualActivities, shouldSelectRandomFourActivities } from "../../utils/activitySelection";
+import { parseGwasetukExcelRows } from "../../utils/gwasetukExcelImport";
 
 const GRADE_OPTIONS = ["A", "B", "C", "D", "E"];
 const SOLAR_GRADE_EVIDENCE = {
@@ -181,71 +182,15 @@ export default function GwasetukPage() {
             const ws = wb.Sheets[wsname];
             const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-            let nameColIndex = -1;
-            let activityColIndex = -1;
-            let headerRowIndex = -1;
-
-            // 1. Find the header row, "성명" column, and "활동 내용" column
-            for (let i = 0; i < data.length; i++) {
-                const row = data[i];
-                // 헤더 행의 모든 열 이름 출력 (디버깅용)
-                if (i === 0) {
-                    console.log("[엑셀 파싱] 헤더 행:", row.map((cell, idx) => `[${idx}]${String(cell).trim()}`).join(" | "));
-                }
-                for (let j = 0; j < row.length; j++) {
-                    const cellValue = String(row[j]).trim().replace(/\s/g, ""); // Remove spaces
-                    if (cellValue === "성명" || cellValue === "이름") {
-                        nameColIndex = j;
-                        headerRowIndex = i;
-                    }
-                    // 활동 내용 열 인식: 다양한 키워드 지원 (세부능력 및 특기사항 포함)
-                    if (cellValue.includes("활동") || cellValue.includes("내용") ||
-                        cellValue.includes("관찰내용") || cellValue.includes("관찰기록") ||
-                        cellValue.includes("세부능력") || cellValue.includes("특기사항") ||
-                        cellValue.includes("세특") || cellValue.includes("개별활동")) {
-                        activityColIndex = j;
-                    }
-                }
-                if (nameColIndex !== -1) break;
-            }
-
-            console.log(`[엑셀 파싱] nameColIndex: ${nameColIndex} activityColIndex: ${activityColIndex} headerRowIndex: ${headerRowIndex}`);
-
-            const newStudents = [];
-            let idCounter = 1;
-
-            // 2. Extract names and activities if columns found
-            if (nameColIndex !== -1) {
-                for (let i = headerRowIndex + 1; i < data.length; i++) {
-                    const row = data[i];
-                    const name = row[nameColIndex];
-                    const activity = activityColIndex !== -1 ? row[activityColIndex] : "";
-                    if (name && typeof name === 'string' && name.trim() !== "") {
-                        const individualActivity = activity && typeof activity === 'string' ? activity.trim() : "";
-                        newStudents.push(createStudent(idCounter++, { name: name.trim(), individualActivity }, activities.length));
-                        if (individualActivity) {
-                            console.log(`[엑셀 파싱] 학생: ${name.trim()} 활동내용: ${individualActivity}`);
-                        }
-                    }
-                }
-            } else {
-                // Fallback: Try to find names in the first few columns if no header found
-                for (let i = 0; i < data.length; i++) {
-                    const row = data[i];
-                    // Check first 3 columns
-                    for (let j = 0; j < Math.min(row.length, 3); j++) {
-                        const val = row[j];
-                        if (typeof val === 'string' && val.length > 1 && val.length < 10) {
-                            if (val !== "성명" && val !== "이름") {
-                                newStudents.push(createStudent(idCounter++, { name: val.trim() }, activities.length));
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
+            const parsed = parseGwasetukExcelRows(data);
+            const importedActivities = parsed.activities;
+            const activityCount = importedActivities.length || activities.length;
+            const newStudents = parsed.students.map((student, index) => createStudent(index + 1, student, activityCount));
 
             if (newStudents.length > 0) {
+                if (importedActivities.length > 0) {
+                    setActivities(importedActivities);
+                }
                 setStudents(newStudents);
                 setStudentCount(newStudents.length);
                 setIsManualInput(false);
