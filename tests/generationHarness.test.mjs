@@ -133,6 +133,28 @@ test("finalizeGeneratedText removes a repeated final sentence", () => {
     assert.equal(text, "토론에서 근거를 비교하여 주장을 정리함. 발표에서 질문에 답변함.");
 });
 
+test("finalizeGeneratedText preserves periods inside English initialisms", () => {
+    // Given
+    const rawText = "V.I.P 경호 상황의 대응 절차를 분석하고 안전 수칙을 정리함.";
+
+    // When
+    const text = finalizeGeneratedText(rawText, 120, 0, "record");
+
+    // Then
+    assert.equal(text, rawText);
+});
+
+test("validateGeneratedText accepts periods inside English initialisms", () => {
+    // Given
+    const text = "V.I.P. 경호 상황의 대응 절차를 분석하고 안전 수칙을 정리함.";
+
+    // When
+    const validation = validateGeneratedText(text, { mode: "record", targetChars: 120 });
+
+    // Then
+    assert.equal(validation.ok, true);
+});
+
 test("validateGeneratedText accepts common noun endings used in records", () => {
     for (const text of [
         "드리블 상황에서 움직임을 예술적인 차원으로 끌어올리는 탐구 정신을 지님.",
@@ -813,7 +835,7 @@ test("buildRepairPrompt makes byte shortfall explicit for long byte targets", ()
     assert.ok(prompt.includes(`Current bytes: ${currentBytes}byte`));
     assert.ok(prompt.includes(`Missing bytes: ${minTargetBytes - currentBytes}byte`));
     assert.ok(prompt.includes("under 1500byte"));
-    assert.ok(prompt.includes("Write 648-678 Korean visible characters"));
+    assert.ok(prompt.includes("Write 521-589 Korean visible characters"));
 });
 
 test("buildRepairPrompt asks for only new observations during short-output repair", () => {

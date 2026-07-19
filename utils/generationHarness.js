@@ -30,6 +30,7 @@ const LETTER_MISSING_PERIOD_PATTERN = new RegExp(`(?:${LETTER_ENDINGS})(?![.!?])
 const RECORD_MISSING_PERIOD_GLOBAL_PATTERN = new RegExp(`(${RECORD_SENTENCE_BOUNDARY_ENDINGS})(?![.!?])\\s+(?=[가-힣A-Za-z0-9"'“”‘’(])`, "g");
 const LETTER_MISSING_PERIOD_GLOBAL_PATTERN = new RegExp(`(${LETTER_ENDINGS})(?![.!?])\\s+(?=[가-힣A-Za-z0-9"'“”‘’(])`, "g");
 const MAX_CHARS = 650;
+const INITIALISM_PERIOD_MARKER = "\uE000";
 const NON_BLOCKING_GENERATION_ISSUE_CODES = new Set(["under_min_chars", "under_min_bytes"]);
 const NON_BLOCKING_LETTER_ISSUE_CODES = new Set(["under_min_chars", "under_min_bytes"]);
 const LETTER_ADVICE_DOMAIN_PATTERNS = [
@@ -79,6 +80,13 @@ function normalizeSpaces(text) {
         .trim();
 }
 
+function protectInitialismPeriods(text) {
+    return String(text || "").replace(
+        /\b[A-Za-z](?:\.[A-Za-z])+(?:\.)?/g,
+        (initialism) => initialism.replace(/\./g, INITIALISM_PERIOD_MARKER),
+    );
+}
+
 function getMissingPeriodPattern(mode) {
     return mode === "letter" ? LETTER_MISSING_PERIOD_PATTERN : RECORD_MISSING_PERIOD_PATTERN;
 }
@@ -88,17 +96,18 @@ function getMissingPeriodGlobalPattern(mode) {
 }
 
 function hasSentenceSpacingIssue(text, mode) {
-    const source = String(text || "").trim();
+    const source = protectInitialismPeriods(String(text || "").trim());
     return SENTENCE_SPACING_PATTERN.test(source) || getMissingPeriodPattern(mode).test(source);
 }
 
 function formatSentenceSpacing(text, mode = "record") {
-    let result = normalizeSpaces(text)
+    let result = protectInitialismPeriods(normalizeSpaces(text))
         .replace(/[!?]/g, ".")
         .replace(getMissingPeriodGlobalPattern(mode), "$1. ")
         .replace(/\s+\./g, ".")
         .replace(/\.{2,}/g, ".")
         .replace(/\.\s*/g, ". ")
+        .replaceAll(INITIALISM_PERIOD_MARKER, ".")
         .trim();
 
     if (result && !result.endsWith(".")) {
@@ -411,6 +420,10 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
 - 입력 핵심어 범위에서 수행 과정, 사고 수준, 참여 태도, 피드백 반영을 자연스럽게 창작·보완함
 - 입력에 없는 작품명, 수상, 기관, 점수, 수치, 도구, 실험 결과 같은 검증 불가능한 새 사실은 지어내지 않음`;
 
+    const existingTextSection = hasMissingRequiredContent
+        ? ""
+        : `\n[수정할 글]\n${text}`;
+
     return `아래 글은 내부 규칙 검증에서 실패했습니다. ${shortfallRewriteInstruction}
 
 [규칙 위반]
@@ -431,10 +444,7 @@ ${endingInstruction}${sentenceSpacingInstruction}${modeSpecificInstruction}${for
 ${expansionFramework}
 
 [원래 작성 조건]
-${sourcePrompt || "(원래 작성 조건 없음)"}
-
-[수정할 글]
-${text}`;
+${sourcePrompt || "(원래 작성 조건 없음)"}${existingTextSection}`;
 }
 
 function truncateToMaxBytes(text, maxTargetBytes) {
@@ -839,6 +849,7 @@ export async function generateWithSilentValidation({
             requiredContentGroups,
             preserveTextOnLengthRepair,
         });
+        console.info(`[생성 검증] 시도=${attempt + 1} 원문=${getUtf8ByteLength(rawText)}byte 최종=${getUtf8ByteLength(text)}byte 검증=${validation.ok ? "통과" : "재시도"} 문제=${validation.issues.map((issue) => issue.code).join(",") || "없음"}`);
         const candidate = { text, validation };
         if (preferBestCandidateOnFailure && isBetterGeneratedCandidate(candidate, bestCandidate, minTargetBytes, mode)) {
             bestCandidate = candidate;

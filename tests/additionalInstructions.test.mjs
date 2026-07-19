@@ -271,9 +271,9 @@ test("large LM Studio models reserve only the output tokens needed for the reque
     assert.equal(getMaxTokensForLocalModel("gemma4:e4b", 589), 3072);
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 236), 768);
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 393), 1024);
-    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 589), 1536);
+    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 589), 768);
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 650), 2048);
-    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-26b-a4b-it-q4ks", 589), 1536);
+    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-26b-a4b-it-q4ks", 589), 768);
 });
 
 test("fetchStream retries a context overflow once with examples removed and core activities preserved", async () => {

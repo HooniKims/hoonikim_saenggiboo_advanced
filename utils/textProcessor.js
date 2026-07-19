@@ -70,8 +70,8 @@ export function getByteTargetVisibleRange(targetChars, minTargetBytes = 0) {
     const byteBasedMinimum = Number(minTargetBytes) > 0
         ? Math.ceil(Number(minTargetBytes) / PROMPT_KOREAN_BYTES_WITH_SPACES)
         : getPromptCharLimit(maxAllowed);
-    const min = Math.max(byteBasedMinimum, Math.ceil(maxAllowed * 1.1));
-    const max = Math.max(min, Math.ceil(maxAllowed * 1.15));
+    const min = Math.min(maxAllowed, byteBasedMinimum);
+    const max = maxAllowed;
     return { min, max };
 }
 

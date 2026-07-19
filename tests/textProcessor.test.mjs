@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
     cleanMetaInfo,
+    getByteTargetVisibleRange,
     getCharacterGuideline,
     getMinimumTargetChars,
     getMinimumTargetBytes,
@@ -89,14 +90,14 @@ test("getPromptCharLimit asks the model for at least 85 percent on every limit",
     assert.equal(getPromptCharLimit(589), 500);
 });
 
-test("getCharacterGuideline uses a dynamic visible-length band without framework labels", () => {
-    const guideline1500 = getCharacterGuideline(589, 1500, 1275);
-    const guideline1000 = getCharacterGuideline(393, 1000, 850);
-    const guideline600 = getCharacterGuideline(236, 600, 510);
+test("getByteTargetVisibleRange never exceeds the character ceiling derived from the byte limit", () => {
+    assert.deepEqual(getByteTargetVisibleRange(589, 1275), { min: 521, max: 589 });
+    assert.deepEqual(getByteTargetVisibleRange(393, 850), { min: 347, max: 393 });
+    assert.deepEqual(getByteTargetVisibleRange(236, 510), { min: 209, max: 236 });
+});
 
-    assert.match(guideline1500, /648-678 Korean visible characters/);
-    assert.match(guideline1000, /433-452 Korean visible characters/);
-    assert.match(guideline600, /260-272 Korean visible characters/);
+test("getCharacterGuideline keeps grounded-expansion guidance without framework labels", () => {
+    const guideline1500 = getCharacterGuideline(589, 1500, 1275);
     assert.match(guideline1500, /동기/);
     assert.match(guideline1500, /수행 과정/);
     assert.match(guideline1500, /관찰 가능한 결과/);

@@ -79,7 +79,7 @@ export function getMaxTokensForLocalModel(modelId, targetChars) {
     const requestedChars = Number(targetChars) || 0;
     if (requestedChars <= 236) return 768;
     if (requestedChars <= 393) return 1024;
-    if (requestedChars <= 589) return 1536;
+    if (requestedChars <= 589) return 768;
     return 2048;
 }
 

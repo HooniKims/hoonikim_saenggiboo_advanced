@@ -87,6 +87,7 @@ export default function GwasetukPage() {
     const [copiedId, setCopiedId] = useState(null);
     const fileInputRef = useRef(null);
     const activityInputRefs = useRef([]);
+    const resultTextareaRefs = useRef({});
     const prevActivitiesLength = useRef(activities.length);
     const {
         openAIKeyInput,
@@ -119,6 +120,17 @@ export default function GwasetukPage() {
         });
     }, [activities.length]);
 
+    // Auto-resize textarea
+    const adjustTextareaHeight = (element) => {
+        if (element) {
+            const maxHeight = 560;
+            element.style.height = "auto";
+            const requiredHeight = element.scrollHeight + 2;
+            element.style.height = Math.min(requiredHeight, maxHeight) + "px";
+            element.style.overflowY = requiredHeight > maxHeight ? "auto" : "hidden";
+        }
+    };
+
     useEffect(() => {
         if (activities.length > prevActivitiesLength.current) {
             const lastIndex = activities.length - 1;
@@ -127,13 +139,9 @@ export default function GwasetukPage() {
         prevActivitiesLength.current = activities.length;
     }, [activities]);
 
-    // Auto-resize textarea
-    const adjustTextareaHeight = (element) => {
-        if (element) {
-            element.style.height = "auto";
-            element.style.height = element.scrollHeight + "px";
-        }
-    };
+    useEffect(() => {
+        students.forEach((student) => adjustTextareaHeight(resultTextareaRefs.current[student.id]));
+    }, [students]);
 
     // Handlers
     const updateStudentList = (count) => {
@@ -562,6 +570,11 @@ ${lengthInstruction}
                             : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars: generationTargetChars }),
                     }),
                 });
+
+            const completedModel = generationResult.provider === "upstage"
+                ? "upstage:solar-pro2"
+                : selectedModel;
+            console.info(`[생성 완료] 모델=${completedModel} 시도=${generationResult.attempts} 최종=${getUtf8ByteLength(generationResult.text)}byte 검증=${generationResult.validation.ok ? "통과" : "경고"}`);
 
             if (generationResult.repaired) {
                 console.log(`[내부 검증] 학생 ${student.id}: ${generationResult.attempts}회 시도 후 규칙 보정`);
@@ -1060,6 +1073,9 @@ ${lengthInstruction}
                                     <div className="relative w-full">
                                         <textarea
                                             value={student.result}
+                                            ref={(element) => {
+                                                resultTextareaRefs.current[student.id] = element;
+                                            }}
                                             onChange={(e) => {
                                                 updateStudent(student.id, "result", e.target.value);
                                                 adjustTextareaHeight(e.target);

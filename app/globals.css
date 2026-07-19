@@ -881,8 +881,10 @@ button {
   min-height: 160px;
   max-height: 560px;
   resize: none;
-  overflow-y: auto !important;
+  overflow-y: hidden;
   line-height: 1.6;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .loading-overlay {
