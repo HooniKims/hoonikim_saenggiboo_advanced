@@ -1,5 +1,6 @@
 const GRADE_OPTIONS = new Set(["A", "B", "C", "D", "E"]);
-const ACTIVITY_START_COLUMN = 7;
+const ACTIVITY_START_COLUMN = 8;
+const INDIVIDUAL_ACTIVITY_COLUMN = ACTIVITY_START_COLUMN - 1;
 
 function normalizeCell(value) {
     return String(value ?? "").trim();
@@ -38,6 +39,9 @@ export function parseGwasetukExcelRows(rows) {
     const activityColumns = headerRow
         .map((header, columnIndex) => ({ columnIndex, name: normalizeCell(header) }))
         .filter(({ columnIndex, name }) => columnIndex >= ACTIVITY_START_COLUMN && name);
+    const individualActivityColumnIndex = headerRow.length > INDIVIDUAL_ACTIVITY_COLUMN
+        ? INDIVIDUAL_ACTIVITY_COLUMN
+        : headerInfo.activityContentColumnIndex;
     const activities = activityColumns.map(({ name }) => name);
     const students = [];
 
@@ -46,9 +50,9 @@ export function parseGwasetukExcelRows(rows) {
         const name = normalizeCell(row[headerInfo.nameColumnIndex]);
         if (!name) continue;
 
-        const individualActivity = headerInfo.activityContentColumnIndex === -1
+        const individualActivity = individualActivityColumnIndex === -1
             ? ""
-            : normalizeCell(row[headerInfo.activityContentColumnIndex]);
+            : normalizeCell(row[individualActivityColumnIndex]);
         const activityGrades = activityColumns.map(({ columnIndex }) => {
             const grade = normalizeCell(row[columnIndex]).toUpperCase();
             return GRADE_OPTIONS.has(grade) ? grade : "";
