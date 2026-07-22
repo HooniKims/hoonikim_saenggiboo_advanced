@@ -7,6 +7,13 @@
 // byte 제한이 실제 기준이며, 글자수는 모델에게 분량을 유도하는 보조 기준입니다.
 const MAX_CHARS = 650;
 const MAX_BYTES = 1500;
+
+// 마침표를 자동으로 붙이거나 문장 경계를 추정할 때 안전한 동사형 종결만 인정합니다.
+// 단음절 어미(음·름·감·다 등)는 다음·흐름·글감·매체마다 같은 일반 명사와 구분할 수 없어
+// 멀쩡한 문장 중간이 "다음." 처럼 잘리는 오탐을 만들었기 때문에 제외합니다.
+export const RECORD_VERBAL_ENDING_SOURCE = "[가-힣]{2,}(?:함|됨|봄|옴|줌|냄|짐|킴)|(?:했|였|았|었|겠|있|없)음|보임|드러남|나타남|돋보임|지님|뛰어남";
+const SAFE_VERBAL_ENDING_PATTERN = new RegExp(`(?:${RECORD_VERBAL_ENDING_SOURCE})$`);
+const LAST_VERBAL_ENDING_PATTERN = new RegExp(`.*(?:${RECORD_VERBAL_ENDING_SOURCE})`);
 const AVG_KOREAN_BYTES_WITH_SPACES = 2.55;
 const PROMPT_KOREAN_BYTES_WITH_SPACES = 2.45;
 
@@ -279,11 +286,16 @@ export function truncateToCompleteSentence(text, targetChars) {
 
     for (const sentence of sentences) {
         const trimmedSentence = sentence.trim();
+        const endsWithPunctuation = /[.!?]$/.test(trimmedSentence);
 
-        // 문장이 마침표로 끝나지 않으면 추가
-        const completeSentence = trimmedSentence.endsWith('.') ||
-            trimmedSentence.endsWith('!') ||
-            trimmedSentence.endsWith('?')
+        // 마침표 없는 끝조각은 안전한 동사형 종결일 때만 문장으로 인정
+        // (중간에 끊긴 "…하며 다음" 같은 조각에 마침표를 붙이면 잘못된 문장이 됨)
+        // 단, 완결 문장이 하나도 없으면 조각이라도 보존해 경고와 함께 수용되게 함
+        if (!endsWithPunctuation && !SAFE_VERBAL_ENDING_PATTERN.test(trimmedSentence) && result) {
+            break;
+        }
+
+        const completeSentence = endsWithPunctuation
             ? trimmedSentence
             : trimmedSentence + '.';
 
@@ -301,14 +313,14 @@ export function truncateToCompleteSentence(text, targetChars) {
     const minAcceptable = maxAllowed * 0.5;
     if (result.length < minAcceptable && sentences.length > 0) {
         const firstSentence = sentences[0].trim();
-        const completeFirst = firstSentence.endsWith('.') ||
-            firstSentence.endsWith('!') ||
-            firstSentence.endsWith('?')
-            ? firstSentence
-            : firstSentence + '.';
+        const endsWithPunctuation = /[.!?]$/.test(firstSentence);
 
-        if (completeFirst.length <= maxAllowed) {
-            result = completeFirst;
+        if (endsWithPunctuation || SAFE_VERBAL_ENDING_PATTERN.test(firstSentence)) {
+            const completeFirst = endsWithPunctuation ? firstSentence : firstSentence + '.';
+
+            if (completeFirst.length <= maxAllowed) {
+                result = completeFirst;
+            }
         }
     }
 
@@ -322,8 +334,8 @@ export function truncateToCompleteSentence(text, targetChars) {
         if (lastPeriodIndex > truncated.length * 0.5) {
             result = truncated.substring(0, lastPeriodIndex + 1);
         } else {
-            // 마침표가 너무 앞에 있으면 종결어미 패턴으로 자르기
-            const match = truncated.match(/.*(?:함|음|임|됨|봄|옴|줌|춤|움|늠|름|남|냄|김|짐|님|감|다|요|까|니|보임|드러남|나타남|돋보임|지님|뛰어남)/);
+            // 마침표가 너무 앞에 있으면 안전한 동사형 종결어미 패턴으로 자르기
+            const match = truncated.match(LAST_VERBAL_ENDING_PATTERN);
             if (match) {
                 result = match[0] + '.';
             } else {

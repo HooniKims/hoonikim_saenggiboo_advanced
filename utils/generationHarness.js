@@ -4,12 +4,18 @@ import {
     getExpansionFrameworkGuideline,
     getMinimumTargetChars,
     getUtf8ByteLength,
+    RECORD_VERBAL_ENDING_SOURCE,
     truncateToCompleteSentence,
 } from "./textProcessor.js";
 
 const RECORD_ENDINGS = "함|음|임|됨|봄|옴|줌|춤|움|늠|름|남|냄|김|킴|짐|님|감|침|보임|드러남|나타남|돋보임|지님|뛰어남";
-const RECORD_SENTENCE_BOUNDARY_ENDINGS = `${RECORD_ENDINGS}|(?<!보)다`;
+// 문장 중간 마침표 삽입 경계: 단음절 어미 전체를 허용하면 다음·매체마다·글감·흐름 같은
+// 일반 명사 뒤에 마침표가 찍혀 문장이 훼손되므로, 안전한 동사형 종결과
+// ㄴ받침 평서형(~한다·높인다)만 경계로 인정함 (보다·마다·바다 제외)
+const RECORD_SENTENCE_BOUNDARY_ENDINGS = `${RECORD_VERBAL_ENDING_SOURCE}|(?<=[가-힣])(?<![보마바])다`;
+const RECORD_CLOSABLE_ENDING_PATTERN = new RegExp(`(?:${RECORD_SENTENCE_BOUNDARY_ENDINGS})$`);
 const LETTER_ENDINGS = "습니다|합니다|입니다|됩니다|바랍니다|드립니다|좋겠습니다|필요합니다|응원합니다";
+const LETTER_CLOSABLE_ENDING_PATTERN = new RegExp(`(?:${LETTER_ENDINGS})$`);
 const RECORD_ENDING_PATTERN = new RegExp(`(?:${RECORD_ENDINGS})\\.\\s*$`);
 const LETTER_ENDING_PATTERN = new RegExp(`(?:${LETTER_ENDINGS})\\.\\s*$`);
 
@@ -111,7 +117,13 @@ function formatSentenceSpacing(text, mode = "record") {
         .trim();
 
     if (result && !result.endsWith(".")) {
-        result += ".";
+        // 중간에 끊긴 조각("…하며 다음")에 마침표를 붙이면 잘못된 문장이 되므로,
+        // 완결된 종결어미로 끝날 때만 마침표를 보충함 (미완결 조각은 이후
+        // truncateToCompleteSentence가 잘라내거나 incomplete_sentence 검증이 걸러냄)
+        const closablePattern = mode === "letter" ? LETTER_CLOSABLE_ENDING_PATTERN : RECORD_CLOSABLE_ENDING_PATTERN;
+        if (closablePattern.test(result)) {
+            result += ".";
+        }
     }
 
     return result;
