@@ -187,3 +187,25 @@ test("club prompt avoids fixed report-writing openings and asks for varied start
     assert.match(clubSource, /고민을 가지고/);
     assert.match(clubSource, /과학 실험 보고서 작성에서/);
 });
+
+test("keeps unmatched numbered details without the misleading 활동N label", () => {
+    const selectedEntries = [
+        { text: "토론 활동", originalIndex: 0 },
+        { text: "자료 조사", originalIndex: 4 },
+    ];
+
+    const result = mergeNumberedIndividualActivities(
+        selectedEntries,
+        "활동1: 반론 정리를 맡음\n활동3: 발표 자료를 주도적으로 제작함",
+    );
+
+    assert.deepEqual(
+        result.activities.map(entry => entry.text),
+        [
+            "토론 활동\n  (이 학생 개별 수행: 반론 정리를 맡음)",
+            "자료 조사",
+        ],
+    );
+    // 활동3은 선택 목록에 없음 → 번호 라벨 없이 내용만 잔여 텍스트로 남김
+    assert.equal(result.remainingIndividualActivity, "발표 자료를 주도적으로 제작함");
+});

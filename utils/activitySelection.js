@@ -252,9 +252,12 @@ export function mergeNumberedIndividualActivities(activities = [], individualAct
         return mergedText;
     });
 
+    // 매칭 실패(참조한 활동이 선택 목록에 없음)한 상세는 "활동N:" 라벨을 떼고 반환함.
+    // 프롬프트의 활동 번호는 셔플/절단 후 위치 기준으로 다시 매겨지므로, 원래 번호를
+    // 남기면 LLM이 같은 번호의 '다른 활동'(다른 등급)에 상세를 잘못 귀속시킴
     const unmatchedDetails = detailNumbers
         .filter(activityNumber => !appliedNumbers.has(activityNumber))
-        .map(activityNumber => `활동${activityNumber}: ${numberedDetails[activityNumber]}`);
+        .map(activityNumber => numberedDetails[activityNumber]);
     const remainingParts = [
         remainingIndividualActivity,
         ...unmatchedDetails,

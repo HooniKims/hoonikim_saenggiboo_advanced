@@ -19,12 +19,23 @@ import { limitActivitiesByTargetChars, mergeNumberedIndividualActivities, should
 import { parseGwasetukExcelRows } from "../../utils/gwasetukExcelImport";
 
 const GRADE_OPTIONS = ["A", "B", "C", "D", "E"];
+// 등급별 증거어: 등급 간 부분문자열 중첩이 없어야 하고(C ⊄ D ⊄ E),
+// D/E는 긍정 문장에 섞여도 매칭되는 중립 명사구 대신 극성이 내장된 구절만 사용함
+// (예전 "기본 요건"·"개별 지도"는 칭찬 문장 안에서도 검증을 통과시켜 톤 역전을 놓쳤음)
 const SOLAR_GRADE_EVIDENCE = {
-    A: ["주도", "심화", "높은 수준", "새로운 관점", "돋보"],
-    B: ["안정적", "충실", "핵심 내용을 이해", "결과를 완성", "잘 해냄"],
-    C: ["보완이 필요", "보완할 필요", "연습이 요구", "도달하지 못", "이해의 제한"],
-    D: ["반복적인 안내", "많은 보완", "지속적인 교사 지원", "다시 확인"],
-    E: ["기본 요건", "개별 지도", "기초 학습 지원", "매우 많은 보완"],
+    A: ["주도적으로 탐구", "심화 질문", "높은 수준", "새로운 관점", "구체적 성과", "돋보"],
+    B: ["안정적으로 수행", "핵심 내용을 이해", "충실히 수행", "결과를 완성", "잘 해냄"],
+    C: ["단계적인 보완이 필요", "단계적으로 보완", "연습이 요구", "도달하지 못한 부분", "더 보완할 필요"],
+    D: ["반복적인 안내", "지속적인 교사 지원", "다시 확인할 필요", "적용에 어려움"],
+    E: ["기본 요건을 충족하는 데 어려움", "매우 많은 보완이 요구", "지속적인 개별 지도", "기초 학습 지원이 필요", "절차부터 다시 익힐"],
+};
+// 활동별 프롬프트 지침용: 해당 등급 서술에서 쓰면 안 되는 다른 등급의 대표 표현
+const GRADE_TONE_AVOID = {
+    A: ["보완이 필요", "연습이 요구", "어려움이 큼", "반복적인 안내", "개별 지도"],
+    B: ["주도적", "돋보임", "탁월", "보완이 필요", "어려움이 큼", "개별 지도"],
+    C: ["매우 많은 보완", "지속적인 개별 지도", "기초 학습 지원", "반복적인 안내", "기본 요건", "주도적", "돋보임", "탁월"],
+    D: ["매우 많은 보완", "기본 요건", "절차부터 다시", "주도적", "돋보임", "탁월"],
+    E: ["주도적", "돋보임", "탁월", "높은 수준", "뛰어남", "심화"],
 };
 const getActivityEvidenceTerms = (text) => {
     const firstClause = String(text || "").trim().replace(/\s+/g, " ").split(/[,.!?]/)[0];
@@ -109,7 +120,7 @@ export default function GwasetukPage() {
         setStudents(prevStudents => {
             let changed = false;
             const nextStudents = prevStudents.map(student => {
-                const activityGrades = normalizeActivityGrades(student.activityGrades, activities.length, student.grade);
+                const activityGrades = normalizeActivityGrades(student.activityGrades, activities.length, "A");
                 if (areSameGrades(activityGrades, student.activityGrades || [])) {
                     return student;
                 }
@@ -192,12 +203,20 @@ export default function GwasetukPage() {
 
             const parsed = parseGwasetukExcelRows(data);
             const importedActivities = parsed.activities;
-            const activityCount = importedActivities.length || activities.length;
+            // 결과 엑셀("활동별 성취도"만 있고 활동명 컬럼은 없음) 재업로드 시 등급이
+            // 현재 활동 개수로 잘리지 않도록, 복원된 등급 개수만큼 활동 슬롯을 확보함
+            const importedGradeCount = parsed.students.reduce(
+                (max, student) => Math.max(max, (student.activityGrades || []).length),
+                0,
+            );
+            const activityCount = importedActivities.length || Math.max(importedGradeCount, activities.length);
             const newStudents = parsed.students.map((student, index) => createStudent(index + 1, student, activityCount));
 
             if (newStudents.length > 0) {
                 if (importedActivities.length > 0) {
                     setActivities(importedActivities);
+                } else if (activityCount > activities.length) {
+                    setActivities(Array.from({ length: activityCount }, (_, index) => activities[index] || ""));
                 }
                 setStudents(newStudents);
                 setStudentCount(newStudents.length);
@@ -215,11 +234,11 @@ export default function GwasetukPage() {
         const nextActivities = newActivities.length ? newActivities : [""];
         setActivities(nextActivities);
         setStudents(prevStudents => prevStudents.map(student => {
-            const currentGrades = normalizeActivityGrades(student.activityGrades, activities.length, student.grade);
+            const currentGrades = normalizeActivityGrades(student.activityGrades, activities.length, "A");
             const activityGrades = normalizeActivityGrades(
                 currentGrades.filter((_, gradeIndex) => gradeIndex !== index),
                 nextActivities.length,
-                student.grade
+                "A"
             );
             return { ...student, activityGrades };
         }));
@@ -234,19 +253,21 @@ export default function GwasetukPage() {
         setStudents(prevStudents => prevStudents.map(s => s.id === id ? { ...s, [field]: value } : s));
     };
 
+    // 활동 등급의 읽기/패딩 기본값은 항상 "A"로 고정함.
+    // (이전에는 student.grade를 폴백으로 써서, 활동1을 E로 바꾼 뒤 활동을 추가하면
+    //  새 활동이 조용히 E로 채워지는 등급 전파 버그가 있었음)
     const getActivityGrade = (student, activityIndex) => {
-        return normalizeActivityGrades(student.activityGrades, activities.length, student.grade)[activityIndex] || "A";
+        return normalizeActivityGrades(student.activityGrades, activities.length, "A")[activityIndex] || "A";
     };
 
     const updateStudentActivityGrade = (id, activityIndex, grade) => {
         if (!GRADE_OPTIONS.includes(grade)) return;
         setStudents(prevStudents => prevStudents.map(student => {
             if (student.id !== id) return student;
-            const activityGrades = normalizeActivityGrades(student.activityGrades, activities.length, student.grade);
+            const activityGrades = normalizeActivityGrades(student.activityGrades, activities.length, "A");
             activityGrades[activityIndex] = grade;
             return {
                 ...student,
-                grade: activityIndex === 0 ? grade : student.grade,
                 activityGrades,
             };
         }));
@@ -312,8 +333,20 @@ export default function GwasetukPage() {
             return `- 활동${i + 1}${originalIndexText}: ${entry.text}`;
         }).join("\n");
 
+        // 활동별로 반드시 써야 하는 성취 수준 표현과 쓰면 안 되는 표현을 명시함
+        // (경량 모델이 등급 지시를 무시하고 E를 칭찬문으로 쓰는 역전을 막는 1차 방어선.
+        //  2차 방어선은 generationHarness의 활동 구간별 grade_tone_mismatch 검증)
+        const activityToneGuideline = selectedActivityEntries.map((entry, i) => {
+            const usePhrases = SOLAR_GRADE_EVIDENCE[entry.grade].slice(0, 3).map((term) => `'${term}'`).join(" 또는 ");
+            const avoidPhrases = GRADE_TONE_AVOID[entry.grade].map((term) => `'${term}'`).join(", ");
+            return `- 활동${i + 1}(${entry.grade}): 이 활동 서술 안에 ${usePhrases} 표현을 반드시 포함하고, ${avoidPhrases} 표현은 이 활동 서술에 쓰지 않음`;
+        }).join("\n");
+
         const activityGradeInstruction = useActivityGrades
             ? `\n[활동별 A/B/C/D/E 반영 기준]\n${selectedActivityEntries.map((entry, i) => `- 활동${i + 1}: ${entry.grade} - ${gradeDescriptions[entry.grade]}`).join("\n")}
+
+[활동별 필수/금지 표현 - 반드시 준수]
+${activityToneGuideline}
 
 [출력 금지]
 - 등급 기호와 라벨은 내부 반영 기준일 뿐이며 [A], (A), A등급, 활동1[A] 같은 표기를 본문에 절대 출력하지 않음
@@ -337,7 +370,7 @@ export default function GwasetukPage() {
 - D와 E 활동을 C 수준으로 완화하지 않음
 - C/D/E 활동은 단계적으로 더 부정적인 수행 제한을 담되, 비난하거나 낙인찍는 표현은 사용하지 않음
 
-(각 활동은 해당 줄의 A/B/C/D/E 기준에 맞춰 깊이와 구체성을 조절하고, 다른 활동의 등급 기준을 섞어 적용하지 마세요. B 활동은 A 수준의 최상위 표현으로 과장하지 말고, C 활동은 B 수준의 안정적 수행으로 올려 쓰지 마세요. D와 E는 C 수준으로 완화하지 마세요. C/D/E 활동은 단계적으로 수행 제한과 보완 필요성을 더 강하게 드러내되 비난하거나 낙인찍는 표현은 사용하지 마세요. 선택한 A/B/C/D/E 등급 문구를 그대로 반복하지 말고 수행 깊이, 자율성, 구체성의 차이로 표현하세요. 등급 기호와 라벨은 내부 반영 기준일 뿐 본문에 절대 출력하지 마세요.)`
+(각 활동은 해당 줄의 A/B/C/D/E 기준에 맞춰 깊이와 구체성을 조절하고, 다른 활동의 등급 기준을 섞어 적용하지 마세요. B 활동은 A 수준의 최상위 표현으로 과장하지 말고, C 활동은 B 수준의 안정적 수행으로 올려 쓰지 마세요. D와 E는 C 수준으로 완화하지 마세요. C/D/E 활동은 단계적으로 수행 제한과 보완 필요성을 더 강하게 드러내되 비난하거나 낙인찍는 표현은 사용하지 마세요. 등급 기준 설명 문장을 통째로 옮겨 적지 말고 수행 깊이, 자율성, 구체성의 차이로 표현하되, [활동별 필수/금지 표현]에 지정된 필수 구절만은 해당 활동 서술 안에 자연스럽게 포함하세요. 등급 기호와 라벨은 내부 반영 기준일 뿐 본문에 절대 출력하지 마세요.)`
             : "";
         const promptBasis = useActivityGrades ? "활동 내용과 활동별 A/B/C/D/E 기준" : "활동 내용";
 
@@ -489,6 +522,15 @@ ${lengthInstruction}
                 })),
             ]
             : [];
+        // 활동 구간별 톤 검증 규칙: 모든 provider 경로에 적용됨.
+        // 앵커로 본문을 활동 구간으로 나누고, 구간 안에 해당 등급 표현이 있는지·
+        // 다른 등급의 표현이 섞이지 않았는지를 generationHarness가 검사함
+        const activityToneRules = selectedActivityEntries.map((entry, index) => ({
+            label: `활동${index + 1}`,
+            grade: entry.grade,
+            anchors: getActivityEvidenceTerms(entry.text),
+            evidence: SOLAR_GRADE_EVIDENCE[entry.grade],
+        }));
 
         try {
             updateStudent(student.id, "status", "loading");
@@ -527,6 +569,7 @@ ${lengthInstruction}
                 mode: "record",
                 forbiddenTerms: [subjectName, student.name],
                 requiredContentGroups: solarRequiredContentGroups,
+                activityToneRules,
             };
             const runLocalGeneration = (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
                 attempt,

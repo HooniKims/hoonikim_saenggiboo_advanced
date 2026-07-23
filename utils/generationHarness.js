@@ -46,6 +46,26 @@ const LETTER_ADVICE_DOMAIN_PATTERNS = [
     { name: "가족관계", pattern: /(가족|가정|대화|지지|격려|관심)/ },
 ];
 
+// 활동 구간별 톤 검증에서 "다른 등급 수준"으로 판정하는 표현 클래스.
+// 필수(요구) 표현은 페이지가 activityToneRules.evidence로 넘기고(단일 출처 유지),
+// 여기서는 등급 간 침범(C 구간에 E급 표현, E 구간에 칭찬 등)만 정규식으로 검사함
+const GRADE_TONE_MARKER_CLASSES = {
+    praise: { label: "최상위 칭찬", pattern: /주도적|돋보이|돋보임|탁월|뛰어난|뛰어남/ },
+    c: { label: "C 수준 보완", pattern: /단계적인 보완|단계적으로 보완|보완할 필요|보완이 필요|연습이 요구|연습이 필요|도달하지 못|이해의 제한/ },
+    d: { label: "D 수준 보완", pattern: /반복적인 안내|지속적인 교사 지원|다시 확인할 필요|적용에 어려움|(?<!매우\s)많은 보완/ },
+    e: { label: "E 수준 보완", pattern: /기본 요건을 충족|매우 많은 보완|지속적인 개별 지도|기초 학습 지원|절차부터 다시/ },
+};
+// 등급별로 해당 활동 구간에 섞이면 안 되는 표현 클래스
+const GRADE_TONE_FORBIDDEN_CLASSES = {
+    A: ["c", "d", "e"],
+    B: ["c", "d", "e"],
+    C: ["d", "e", "praise"],
+    D: ["e", "praise"],
+    E: ["praise"],
+};
+// 해당 등급 구간에 반드시 있어야 하는 증거 표현(evidence)을 검사할 등급
+const GRADE_TONE_EVIDENCE_REQUIRED = new Set(["C", "D", "E"]);
+
 const ISSUE_LABELS = {
     empty: "응답이 비어 있음",
     over_target_chars: "글자수 제한 초과",
@@ -62,6 +82,7 @@ const ISSUE_LABELS = {
     incomplete_sentence: "문장 종결 불완전",
     sentence_spacing: "문장 마침표/띄어쓰기 오류",
     grade_label: "등급 기호 출력",
+    grade_tone_mismatch: "활동별 성취 수준 표현 불일치",
     direct_advice: "직접 지시형 표현 포함",
     missing_required_term: "필수 설정 용어 누락",
     missing_required_content: "필수 활동 또는 성취 표현 누락",
@@ -250,6 +271,59 @@ function getMissingAdviceDomains(text) {
         .map(({ name }) => name);
 }
 
+function getActivityToneRules(rules) {
+    return (rules || [])
+        .map((rule) => ({
+            label: String(rule?.label || "활동").trim(),
+            grade: String(rule?.grade || "").trim().toUpperCase(),
+            anchors: getRuleTerms(rule?.anchors),
+            evidence: getRuleTerms(rule?.evidence),
+        }))
+        .filter((rule) => GRADE_TONE_FORBIDDEN_CLASSES[rule.grade] && rule.anchors.length > 0);
+}
+
+// 본문을 활동 앵커 위치 기준 구간으로 나눔. 앵커를 못 찾은 활동은 구간 검사에서
+// 제외함 (활동 자체의 누락은 requiredContentGroups의 missing_required_content가 잡음)
+function getActivityToneSegments(text, rules) {
+    const source = String(text || "");
+    const located = [];
+    for (const rule of rules) {
+        let position = -1;
+        for (const anchor of rule.anchors) {
+            const index = source.indexOf(anchor);
+            if (index >= 0 && (position < 0 || index < position)) {
+                position = index;
+            }
+        }
+        if (position >= 0) {
+            located.push({ rule, position });
+        }
+    }
+    located.sort((left, right) => left.position - right.position);
+    return located.map((entry, index) => ({
+        rule: entry.rule,
+        segment: source.slice(entry.position, index + 1 < located.length ? located[index + 1].position : source.length),
+    }));
+}
+
+function getGradeToneViolations(text, rules) {
+    const violations = [];
+    for (const { rule, segment } of getActivityToneSegments(text, rules)) {
+        if (GRADE_TONE_EVIDENCE_REQUIRED.has(rule.grade) && rule.evidence.length > 0
+            && !rule.evidence.some((term) => hasRequiredContentEvidence(segment, term))) {
+            violations.push(`${rule.label}(${rule.grade}): ${rule.grade} 수준 표현 누락 (${rule.evidence.slice(0, 3).join(" / ")} 중 하나 필요)`);
+        }
+        for (const classKey of GRADE_TONE_FORBIDDEN_CLASSES[rule.grade]) {
+            const markerClass = GRADE_TONE_MARKER_CLASSES[classKey];
+            const match = segment.match(markerClass.pattern);
+            if (match) {
+                violations.push(`${rule.label}(${rule.grade}): ${markerClass.label} 표현 '${match[0]}' 사용 금지`);
+            }
+        }
+    }
+    return violations;
+}
+
 export function validateGeneratedText(text, options = {}) {
     const {
         forbiddenTerms = [],
@@ -262,6 +336,7 @@ export function validateGeneratedText(text, options = {}) {
         bannedTerms = [],
         requiredAdviceDomains = false,
         requiredContentGroups = [],
+        activityToneRules = [],
     } = options;
     const source = String(text || "");
     const trimmed = source.trim();
@@ -341,6 +416,12 @@ export function validateGeneratedText(text, options = {}) {
         addIssue(issues, "grade_label");
     }
 
+    if (mode === "record") {
+        for (const violation of getGradeToneViolations(trimmed, getActivityToneRules(activityToneRules))) {
+            addIssue(issues, "grade_tone_mismatch", violation);
+        }
+    }
+
     if (mode === "letter" && LETTER_DIRECT_ADVICE_PATTERN.test(trimmed)) {
         addIssue(issues, "direct_advice");
     }
@@ -371,7 +452,7 @@ export function validateGeneratedText(text, options = {}) {
     };
 }
 
-export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars, maxTargetBytes = 0, minTargetBytes = 0, minTargetChars = 0, mode = "record", forbiddenTerms = [], requiredTerms = [], requiredContentGroups = [], bannedTerms = [], preserveTextOnLengthRepair = false }) {
+export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars, maxTargetBytes = 0, minTargetBytes = 0, minTargetChars = 0, mode = "record", forbiddenTerms = [], requiredTerms = [], requiredContentGroups = [], bannedTerms = [], activityToneRules = [], preserveTextOnLengthRepair = false }) {
     const maxAllowed = clampTargetChars(targetChars);
     const minAllowed = Math.max(0, Math.min(Math.floor(Number(minTargetChars) || 0), maxAllowed));
     const minAllowedBytes = Math.max(0, Math.floor(Number(minTargetBytes) || 0));
@@ -407,6 +488,18 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
         : "";
     const bannedText = getRuleTerms(bannedTerms).length
         ? `\n- 다음 설정 충돌 용어는 절대 포함하지 않음: ${getRuleTerms(bannedTerms).join(", ")}`
+        : "";
+    const toneRules = getActivityToneRules(activityToneRules);
+    const toneRulesText = toneRules.length
+        ? `\n- 활동별 성취 수준 표현을 반드시 지킴 (표현은 반드시 '해당 활동을 다루는 문장 안'에 배치):\n${toneRules.map((rule) => {
+            const required = GRADE_TONE_EVIDENCE_REQUIRED.has(rule.grade) && rule.evidence.length
+                ? `${rule.evidence.slice(0, 3).map((term) => `'${term}'`).join(" 또는 ")} 표현을 포함`
+                : "성취를 긍정적으로 서술";
+            const forbidden = GRADE_TONE_FORBIDDEN_CLASSES[rule.grade]
+                .map((classKey) => GRADE_TONE_MARKER_CLASSES[classKey].label)
+                .join("·");
+            return `  · ${rule.label}(${rule.grade}): ${required}, ${forbidden} 표현은 이 활동 서술에 쓰지 않음`;
+        }).join("\n")}`
         : "";
     const expansionFramework = getExpansionFrameworkGuideline();
     const endingInstruction = mode === "letter"
@@ -451,7 +544,7 @@ ${expansionRules}
 - 제목, 번호, 분석, 글자수 설명 없이 본문만 출력
 - 지침 충돌을 설명하지 않고 '주의', '시스템 오류', '재작성 요청', '사용자 추가 지침' 같은 메타 문구를 출력하지 않음
 - '마지막으로', '끝으로', '마무리하며', '덧붙여', '추가로' 같은 마무리 접속어를 사용하지 않음
-${endingInstruction}${sentenceSpacingInstruction}${modeSpecificInstruction}${forbiddenText}${requiredText}${requiredContentText}${bannedText}
+${endingInstruction}${sentenceSpacingInstruction}${modeSpecificInstruction}${forbiddenText}${requiredText}${requiredContentText}${bannedText}${toneRulesText}
 
 ${expansionFramework}
 
@@ -800,6 +893,7 @@ export async function generateWithSilentValidation({
     maxRepairAttempts = 1,
     requiredAdviceDomains = false,
     requiredContentGroups = [],
+    activityToneRules = [],
     preserveTextOnLengthRepair = false,
     preferBestCandidateOnFailure = false,
     stripExpandedGradeLabels = false,
@@ -859,6 +953,7 @@ export async function generateWithSilentValidation({
             bannedTerms,
             requiredAdviceDomains,
             requiredContentGroups,
+            activityToneRules,
             preserveTextOnLengthRepair,
         });
         console.info(`[생성 검증] 시도=${attempt + 1} 원문=${getUtf8ByteLength(rawText)}byte 최종=${getUtf8ByteLength(text)}byte 검증=${validation.ok ? "통과" : "재시도"} 문제=${validation.issues.map((issue) => issue.code).join(",") || "없음"}`);
@@ -901,6 +996,7 @@ export async function generateWithSilentValidation({
             requiredTerms,
             requiredContentGroups,
             bannedTerms,
+            activityToneRules,
             preserveTextOnLengthRepair,
             requiredAdviceDomains,
         });
@@ -927,6 +1023,7 @@ export async function generateWithSilentValidation({
         bannedTerms,
         requiredAdviceDomains,
         requiredContentGroups,
+        activityToneRules,
     });
 
     if (validation.ok) {

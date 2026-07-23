@@ -98,7 +98,8 @@ test("gwasetuk prompt defines visibly different writing strength for A through E
     assert.match(source, /B는 안정적 수행, C는 부분 보완, D는 많은 보완, E는 매우 많은 보완/);
     assert.match(source, /C 활동은 B 수준의 안정적 수행으로 올려 쓰지 않음/);
     assert.match(source, /D와 E 활동을 C 수준으로 완화하지 않음/);
-    assert.match(source, /선택한 A\/B\/C\/D\/E 등급 문구를 그대로 반복하지 말고/);
+    assert.match(source, /등급 기준 설명 문장을 통째로 옮겨 적지 말고/);
+    assert.match(source, /\[활동별 필수\/금지 표현\]에 지정된 필수 구절만은 해당 활동 서술 안에 자연스럽게 포함/);
 });
 
 test("gwasetuk prompt forbids exposing internal activity grade labels", () => {
@@ -108,4 +109,18 @@ test("gwasetuk prompt forbids exposing internal activity grade labels", () => {
     assert.match(source, /A등급/);
     assert.match(source, /활동1\[A\]/);
     assert.match(source, /본문에 절대 출력하지 않음/);
+});
+
+test("gwasetuk activity grades default to A and never propagate from another activity", () => {
+    // 활동1 등급이 student.grade를 통해 새 활동의 기본값으로 전파되던 버그 회귀 방지
+    assert.doesNotMatch(source, /grade: activityIndex === 0 \? grade : student\.grade/);
+    assert.match(source, /normalizeActivityGrades\(student\.activityGrades, activities\.length, "A"\)/);
+    assert.doesNotMatch(source, /normalizeActivityGrades\(student\.activityGrades, activities\.length, student\.grade\)/);
+});
+
+test("gwasetuk import keeps restored grade slots when the exported file has no activity columns", () => {
+    // 결과 엑셀 재업로드 시 등급이 현재 활동 개수로 잘리던 문제 회귀 방지
+    assert.match(source, /const importedGradeCount = parsed\.students\.reduce/);
+    assert.match(source, /Math\.max\(importedGradeCount, activities\.length\)/);
+    assert.match(source, /activityCount > activities\.length/);
 });
