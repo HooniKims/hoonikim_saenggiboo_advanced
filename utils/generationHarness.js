@@ -501,7 +501,7 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
                 .map((classKey) => GRADE_TONE_MARKER_CLASSES[classKey].label)
                 .join("·");
             return `  · ${rule.label}(${rule.grade}): ${required}, ${forbidden} 표현은 이 활동 서술에 쓰지 않음`;
-        }).join("\n")}`
+        }).join("\n")}\n  · 필수 표현은 활동마다 같은 문장 틀로 반복하지 말고 각 활동의 수행 내용과 결합해 서로 다른 문장으로 표현함`
         : "";
     const expansionFramework = getExpansionFrameworkGuideline();
     const endingInstruction = mode === "letter"

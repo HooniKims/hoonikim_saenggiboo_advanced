@@ -340,7 +340,8 @@ export default function GwasetukPage() {
             const usePhrases = SOLAR_GRADE_EVIDENCE[entry.grade].slice(0, 3).map((term) => `'${term}'`).join(" 또는 ");
             const avoidPhrases = GRADE_TONE_AVOID[entry.grade].map((term) => `'${term}'`).join(", ");
             return `- 활동${i + 1}(${entry.grade}): 이 활동 서술 안에 ${usePhrases} 표현을 반드시 포함하고, ${avoidPhrases} 표현은 이 활동 서술에 쓰지 않음`;
-        }).join("\n");
+        }).join("\n")
+            + "\n- 위 필수 표현은 각 활동의 실제 수행 내용과 결합해 서로 다른 문장으로 녹여 쓰고, 같은 문장 틀을 활동마다 그대로 복사하듯 반복하지 않음";
 
         const activityGradeInstruction = useActivityGrades
             ? `\n[활동별 A/B/C/D/E 반영 기준]\n${selectedActivityEntries.map((entry, i) => `- 활동${i + 1}: ${entry.grade} - ${gradeDescriptions[entry.grade]}`).join("\n")}

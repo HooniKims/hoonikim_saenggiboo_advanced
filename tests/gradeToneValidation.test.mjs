@@ -140,3 +140,15 @@ test("grade tone validation flags harsh deficit phrasing inside a C activity", (
     const details = validation.issues.filter((issue) => issue.code === "grade_tone_mismatch").map((issue) => issue.detail);
     assert.ok(details.some((detail) => detail.includes("직접 결핍 서술")), `결핍 서술 검출 실패: ${details}`);
 });
+
+test("prompt and repair prompt forbid copy-pasting the same required phrase frame across activities", () => {
+    assert.match(pageSource, /같은 문장 틀을 활동마다 그대로 복사하듯 반복하지 않음/);
+    const prompt = buildRepairPrompt({
+        text: "본문",
+        issues: [],
+        targetChars: 650,
+        mode: "record",
+        activityToneRules: toneRules("C", "E"),
+    });
+    assert.match(prompt, /필수 표현은 활동마다 같은 문장 틀로 반복하지 말고/);
+});
