@@ -88,14 +88,14 @@ test("gwasetuk prompt defines visibly different writing strength for A through E
     assert.match(source, /E 전용 권장 표현/);
     assert.match(source, /등급 간 대비 규칙/);
     assert.match(source, /B 활동에는 탁월함·돋보임·뛰어남·심화·주도적 같은 A급 표현을 쓰지 않음/);
-    assert.match(source, /C 활동에는 일부 기준점에 아직 충분히 도달하지 못한 부분/);
+    assert.match(source, /C 활동에는 성실한 참여와 시도를 먼저 인정하고/);
     assert.match(source, /D 활동은 C보다 더 뚜렷하게 반복적인 안내와 보완 필요성을 드러냄/);
     assert.match(source, /E 활동은 D보다 더 낮은 수행 수준으로/);
     assert.match(source, /잘 해냄 기조/);
-    assert.match(source, /단계적인 보완이 필요한 지점/);
+    assert.match(source, /연습이 더해지면 향상이 기대됨/);
     assert.match(source, /지속적인 개별 지도와 기초 학습 지원이 필요한 지점/);
     assert.match(source, /비난하거나 낙인찍는 표현은 사용하지 않음/);
-    assert.match(source, /B는 안정적 수행, C는 부분 보완, D는 많은 보완, E는 매우 많은 보완/);
+    assert.match(source, /B는 안정적 수행, C는 성실한 참여와 성장 여지, D는 많은 보완, E는 매우 많은 보완/);
     assert.match(source, /C 활동은 B 수준의 안정적 수행으로 올려 쓰지 않음/);
     assert.match(source, /D와 E 활동을 C 수준으로 완화하지 않음/);
     assert.match(source, /등급 기준 설명 문장을 통째로 옮겨 적지 말고/);

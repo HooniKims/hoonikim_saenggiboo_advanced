@@ -86,7 +86,7 @@ test("grade tone validation follows activity order in the text (E first)", () =>
     const goodMixEC = "소설 소나기(황순원)를 읽고 인물의 심리 변화를 분석하여 모둠 토의에서 의견을 나눔. "
         + "감정의 흐름을 파악하는 과정에서 기본 요건을 충족하는 데 어려움이 크며 지속적인 개별 지도와 기초 학습 지원이 필요한 지점이 뚜렷함. "
         + "주장하는 글쓰기 활동에서 매체 자료를 근거로 논설문을 작성하고 고쳐쓰기를 함. "
-        + "핵심 정보를 문장으로 연결하는 부분에서 도달하지 못한 부분이 있어 단계적인 보완이 필요함.";
+        + "핵심 정보를 문장으로 연결하는 표현의 구체성을 높일 여지가 있어 단계적인 연습이 요구됨.";
     const validation = validateGeneratedText(goodMixEC, {
         mode: "record",
         targetChars: 650,
@@ -96,7 +96,7 @@ test("grade tone validation follows activity order in the text (E first)", () =>
 });
 
 test("grade tone rules skip activities whose anchors are missing", () => {
-    const onlyFirst = "소설 소나기(황순원)를 읽고 인물의 심리 변화를 분석함. 기초 이해를 더 보완할 필요가 있음.";
+    const onlyFirst = "소설 소나기(황순원)를 읽고 인물의 심리 변화를 분석함. 표현의 구체성을 높일 여지가 있어 연습이 요구됨.";
     const validation = validateGeneratedText(onlyFirst, {
         mode: "record",
         targetChars: 650,
@@ -125,4 +125,18 @@ test("gwasetuk prompt includes per-activity mandatory and forbidden tone phrases
     assert.match(pageSource, /GRADE_TONE_AVOID/);
     assert.match(pageSource, /const activityToneRules = selectedActivityEntries\.map/);
     assert.match(pageSource, /activityToneRules,\s*\n\s*\};/);
+});
+
+test("grade tone validation flags harsh deficit phrasing inside a C activity", () => {
+    const harshDeficitC = "소설 소나기(황순원)를 읽고 인물의 심리 변화를 분석하여 모둠 토의에서 의견을 나눔. "
+        + "일부 기준점에 도달하지 못한 부분이 있어 연습이 요구됨.";
+    const validation = validateGeneratedText(harshDeficitC, {
+        mode: "record",
+        targetChars: 650,
+        activityToneRules: [
+            { label: "활동1", grade: "C", anchors: ["소설 소나기"], evidence: SOLAR_GRADE_EVIDENCE.C },
+        ],
+    });
+    const details = validation.issues.filter((issue) => issue.code === "grade_tone_mismatch").map((issue) => issue.detail);
+    assert.ok(details.some((detail) => detail.includes("직접 결핍 서술")), `결핍 서술 검출 실패: ${details}`);
 });
