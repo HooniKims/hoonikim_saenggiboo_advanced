@@ -597,10 +597,10 @@ NEIS 자동 입력 크롬 확장 프로그램 개발이 완료되었습니다.
 - [x] **LM Studio 모델 자동 사용 경로 추가**
     - [x] `.env`에 `LMSTUDIO_API_URL`, `LMSTUDIO_API_KEY`, `LMSTUDIO_GEMMA_26B_MODEL` 추가
     - [x] `Gemma 4 26B Q4 - 속도 느림, 품질 높음` 모델을 로컬 모델 4번째로 추가
-    - [x] 해당 모델 선택 시 사용자가 URL/API key를 입력하지 않아도 `https://lm.alluser.site`와 모델 identifier `gemma-4-26b-a4b-it`를 자동 사용하도록 구성
+    - [x] 해당 모델 선택 시 사용자가 URL/API key를 입력하지 않아도 `https://lm.alluser.kr`와 모델 identifier `gemma-4-26b-a4b-it`를 자동 사용하도록 구성
     - [x] 실제 파일 기준 `Q4_K_S` 양자화 GGUF 모델이므로 UI 표시명을 `Gemma 4 26B Q4`로 정리
 - [x] **LM Studio/NPM 연결 원인 분석**
-    - [x] `https://lm.alluser.site/v1/models`의 `502 Bad Gateway`가 앱 코드 문제가 아니라 NPM upstream 연결 문제임을 확인
+    - [x] `https://lm.alluser.kr/v1/models`의 `502 Bad Gateway`가 앱 코드 문제가 아니라 NPM upstream 연결 문제임을 확인
     - [x] Mac mini에서 `127.0.0.1:1234/v1/models`는 성공하고 `192.168.0.207:1234`는 실패하는 상태를 확인
     - [x] LM Studio Local Server의 LAN 접근 허용 후 `192.168.0.207:1234` 연결 가능 상태로 전환
 - [x] **OpenAI 생성 경로 보정**
@@ -631,7 +631,7 @@ NEIS 자동 입력 크롬 확장 프로그램 개발이 완료되었습니다.
 - [x] **로컬 모델 목록 재정리**
     - [x] 사용자 선택 목록을 `Gemma 4 E4B`, `Gemma 4 E2B`, `Gemma 4 26B Q4` 3개로 정리
     - [x] 기존 원격 Ollama용 `gemma4:26b` 항목 제거
-    - [x] 세 모델 모두 `https://lm.alluser.site` LM Studio 엔드포인트를 사용하도록 `utils/streamFetch.js` 구성 변경
+    - [x] 세 모델 모두 `https://lm.alluser.kr` LM Studio 엔드포인트를 사용하도록 `utils/streamFetch.js` 구성 변경
 - [x] **기본 모델 변경**
     - [x] 기본 모델을 `Gemma 4 26B Q4`로 변경
     - [x] 드롭다운 표시 문구를 26B Q4 기준으로 정리
@@ -803,9 +803,9 @@ NEIS 자동 입력 크롬 확장 프로그램 개발이 완료되었습니다.
     - [x] 조언 영역이 빠진 경우 계절 필수어(`여름방학`, `겨울방학`, `새 학기`)를 보존하면서 보정 문장을 추가하거나 마지막 안내 문장을 교체하도록 처리
     - [x] 가정통신문도 다른 생성 결과와 같이 byte 기준 글자수 검증을 적용하되, 분량 부족만 있는 경우는 경고로 허용하는 정책 유지
 - [x] **로컬 LLM 및 API 경로 확인**
-    - [x] 로컬 LLM 기본 호출 경로가 `https://lm.alluser.site/v1/chat/completions`를 사용하고 `Origin`/`Referer` 헤더도 같은 도메인으로 전달되는지 테스트로 확인
+    - [x] 로컬 LLM 기본 호출 경로가 `https://lm.alluser.kr/v1/chat/completions`를 사용하고 `Origin`/`Referer` 헤더도 같은 도메인으로 전달되는지 테스트로 확인
     - [x] OpenAI, NVIDIA, 로컬 LLM 모두 가정통신문 전용 시스템 메시지와 `outputType: "letter"`를 유지하도록 회귀 테스트 추가
-    - [x] 실제 `lm.alluser.site` API로 여름방학 2개, 겨울방학 2개 샘플을 생성해 계절어와 조언 영역 검증을 확인
+    - [x] 실제 `lm.alluser.kr` API로 여름방학 2개, 겨울방학 2개 샘플을 생성해 계절어와 조언 영역 검증을 확인
 - [x] **검증**
     - [x] `npm test` 전체 94개 테스트 통과 확인
     - [x] `npm run build` 프로덕션 빌드 통과 확인
