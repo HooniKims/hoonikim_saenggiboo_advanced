@@ -4,8 +4,8 @@ const LMSTUDIO_API_URL = process.env.NEXT_PUBLIC_LMSTUDIO_API_URL?.trim() || "ht
 const LMSTUDIO_API_KEY = process.env.NEXT_PUBLIC_LMSTUDIO_API_KEY?.trim() || "";
 const LMSTUDIO_GEMMA_E4B_MODEL = "google/gemma-4-e4b";
 const LMSTUDIO_GEMMA_E2B_MODEL = "google/gemma-4-e2b";
-const LMSTUDIO_GEMMA_12B_MODEL = "gemma-4-12b-it";
-const LMSTUDIO_GEMMA_26B_MODEL = "gemma-4-26b-a4b-it";
+const LMSTUDIO_GEMMA_12B_MODEL = "unsloth/gemma-4-12b-it";
+const LMSTUDIO_GOOGLE_GEMMA_12B_MODEL = "google/gemma-4-12b";
 
 /**
  * 사용 가능한 모델 목록
@@ -14,8 +14,8 @@ const LMSTUDIO_GEMMA_26B_MODEL = "gemma-4-26b-a4b-it";
 export const AVAILABLE_MODELS = [
     { id: "gemma4:e4b", name: "Gemma 4 E4B", description: "빠름, 품질 보통", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E4B_MODEL },
     { id: "gemma4:e2b", name: "Gemma 4 E2B", description: "가장 빠름, 간단 작업용", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E2B_MODEL },
-    { id: "lmstudio:gemma-4-12b-it", name: "Gemma 4 12B", description: "Solar 오류 시 자동 대체 · 균형형", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_12B_MODEL },
-    { id: "lmstudio:gemma-4-26b-a4b-it-q4ks", name: "Gemma 4 26B Q4", description: "가장 느림, 품질 높음", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_26B_MODEL },
+    { id: "lmstudio:gemma-4-12b-it", name: "Gemma 4 12B IT", description: "Solar 오류 시 자동 대체 · 균형형", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_12B_MODEL },
+    { id: "lmstudio:google-gemma-4-12b", name: "Gemma 4 12B", description: "Google 원본 12B, 느리지만 품질 높음", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GOOGLE_GEMMA_12B_MODEL },
     { id: "upstage:solar-pro4", name: "Upstage Solar Pro 4", description: "기본 모델 · 세특·행발 최고 품질", isLightweight: false, provider: "upstage" },
     { id: "upstage:solar-open2", name: "Upstage Solar Open 2", description: "빠른 속도 · 동아리 작성 강점", isLightweight: false, provider: "upstage" },
 ];

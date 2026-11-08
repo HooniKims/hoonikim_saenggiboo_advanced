@@ -210,13 +210,13 @@ test("local model list only exposes LM Studio-backed Gemma models", async () => 
         "gemma4:e4b",
         "gemma4:e2b",
         "lmstudio:gemma-4-12b-it",
-        "lmstudio:gemma-4-26b-a4b-it-q4ks",
+        "lmstudio:google-gemma-4-12b",
     ]);
     assert.deepEqual(localModels.map(getModelOptionLabel), [
         "Gemma 4 E4B - 빠름, 품질 보통",
         "Gemma 4 E2B - 가장 빠름, 간단 작업용",
-        "Gemma 4 12B - Solar 오류 시 자동 대체 · 균형형",
-        "Gemma 4 26B Q4 - 가장 느림, 품질 높음",
+        "Gemma 4 12B IT - Solar 오류 시 자동 대체 · 균형형",
+        "Gemma 4 12B - Google 원본 12B, 느리지만 품질 높음",
     ]);
 
     const requests = [];
@@ -259,8 +259,8 @@ test("local model list only exposes LM Studio-backed Gemma models", async () => 
     assert.deepEqual(requests.map((request) => request.body.model), [
         "google/gemma-4-e4b",
         "google/gemma-4-e2b",
-        "gemma-4-12b-it",
-        "gemma-4-26b-a4b-it",
+        "unsloth/gemma-4-12b-it",
+        "google/gemma-4-12b",
     ]);
     assert.equal(requests.every((request) => request.headers["X-API-Key"] === undefined), true);
     assert.equal(requests.every((request) => request.body.reasoning_effort === "none"), true);
@@ -273,7 +273,7 @@ test("large LM Studio models reserve only the output tokens needed for the reque
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 393), 1024);
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 589), 768);
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 650), 2048);
-    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-26b-a4b-it-q4ks", 589), 768);
+    assert.equal(getMaxTokensForLocalModel("lmstudio:google-gemma-4-12b", 589), 768);
 });
 
 test("fetchStream retries a context overflow once with examples removed and core activities preserved", async () => {
