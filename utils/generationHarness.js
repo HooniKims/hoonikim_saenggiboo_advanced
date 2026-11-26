@@ -600,6 +600,10 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
             ? "누락된 활동이 뒤에서 잘리지 않도록 기존 글을 그대로 이어 붙이지 말고, 모든 필수 활동에 분량을 균등하게 나누어 전체 본문을 다시 작성하세요. 첫 문장을 공통 활동1로 시작하고 나머지 공통 활동을 입력 순서대로 서술하세요."
         : mode === "letter"
             ? "기존 조언을 반복하지 말고, 각 조언에 서로 다른 구체적 실천 방법을 담아 전체 본문을 다시 작성하세요."
+        : issueCodes.has("repetition")
+            ? strictFacts
+                ? "같은 내용을 되풀이한 문장을 하나로 합쳐 전체 본문을 다시 작성하세요. 새 사실은 더하지 말고 다른 문장과 평가 표현은 유지하세요."
+                : "같은 내용을 되풀이한 문장을 하나로 합치고, 줄어든 분량은 앞에 없던 새 관찰(동기, 방법, 어려움과 해결, 변화, 배운 점)로 채워 전체 본문을 다시 작성하세요. 다른 문장과 평가 표현은 유지하세요."
             : "의미는 유지하되 규칙에 맞게 다시 작성하세요.";
 
     // 기본은 분량을 채우도록 창작·보완을 허용하고, '입력한 활동만으로 작성'을 체크하면 입력 사실만 쓴다.
@@ -608,7 +612,7 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
 - 분량을 늘리려고 같은 사실을 반복하거나 입력에 없는 작품명, 수상, 기관, 점수, 수치, 도구, 실험 결과를 넣지 않음. 입력이 적으면 분량 목표보다 사실에 맞는 서술을 우선함`
         : preserveTextOnLengthRepair
             ? `- 분량이 부족하면 핵심 키워드의 의미 범위 안에서 동기, 수행 과정, 사고 수준, 참여 태도, 피드백 반영을 자연스럽게 창작·보완하고 성취 수준을 구체화함
-- 같은 활동을 서로 다른 관찰 관점으로 풀어 여러 문장으로 전개하고 표현과 문장 구조를 반복하지 않음
+- 같은 활동을 다시 쓸 때는 앞에서 쓰지 않은 새 관찰(동기, 방법, 어려움과 해결, 변화, 배운 점)을 담고, 이미 쓴 내용을 다른 말로 되풀이하지 않음
 - 입력된 활동의 동기, 수행 과정, 관찰 가능한 결과, 성장 단서를 자연스럽게 연결함
 - 입력에 없는 작품명, 수상, 기관, 점수, 수치, 도구, 실험 결과 같은 검증 불가능한 새 사실은 지어내지 않음`
             : `- 분량이 부족하면 입력 활동의 과정, 근거, 태도, 변화, 구체적 수행 장면을 더 촘촘하게 풀어 씀
@@ -986,6 +990,7 @@ export async function generateWithSilentValidation({
     preferBestCandidateOnFailure = false,
     stripExpandedGradeLabels = false,
     strictFacts = false,
+    checkRepetition = null,
 }) {
     if (typeof generateOnce !== "function") {
         throw new Error("generateOnce 함수가 필요합니다.");
@@ -1028,7 +1033,7 @@ export async function generateWithSilentValidation({
                 { bannedTerms, requiredTerms },
             );
         }
-        const validation = validateGeneratedText(text, {
+        const validationOptions = {
             forbiddenTerms,
             maxTargetBytes,
             minTargetBytes,
@@ -1041,7 +1046,30 @@ export async function generateWithSilentValidation({
             requiredContentGroups,
             activityToneRules,
             preserveTextOnLengthRepair,
-        });
+        };
+        let validation = validateGeneratedText(text, validationOptions);
+        // 같은 내용을 다른 말로 되풀이했는지는 뜻을 읽어야 해서 외부 판정(Solar Mini)에 맡긴다.
+        // 짚은 뒤 문장은 코드가 바로 지운다. 모자란 분량은 이어 쓰기 단계가 '겹치지 않는 새 문장'으로 채운다.
+        // 다시 쓸 기회가 남아 있고 다른 규칙은 통과했을 때만 묻고, 마지막 시도에서는 묻지 않는다.
+        if (mode === "record" && typeof checkRepetition === "function" && attempt < maxRepairAttempts
+            && (validation.ok || hasOnlyNonBlockingGenerationIssues(validation.issues, mode))) {
+            let judged = null;
+            try {
+                judged = await checkRepetition(text);
+            } catch {
+                judged = null;
+            }
+            const repeatedIndexes = new Set((Array.isArray(judged?.pairs) ? judged.pairs : [])
+                .map((pair) => Number(pair?.[1]) - 1)
+                .filter((index) => Number.isInteger(index) && index >= 0));
+            const sentences = text.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter(Boolean);
+            const keptSentences = sentences.filter((_, index) => !repeatedIndexes.has(index));
+            if (keptSentences.length > 0 && keptSentences.length < sentences.length) {
+                console.info(`[반복 정리] 같은 내용을 되풀이한 문장 ${sentences.length - keptSentences.length}개를 지움`);
+                text = keptSentences.join(" ");
+                validation = validateGeneratedText(text, validationOptions);
+            }
+        }
         console.info(`[생성 검증] 시도=${attempt + 1} 원문=${getUtf8ByteLength(rawText)}byte 최종=${getUtf8ByteLength(text)}byte 검증=${validation.ok ? "통과" : "재시도"} 문제=${validation.issues.map((issue) => issue.code).join(",") || "없음"}`);
         const candidate = { text, validation };
         if (preferBestCandidateOnFailure && isBetterGeneratedCandidate(candidate, bestCandidate, minTargetBytes, mode)) {

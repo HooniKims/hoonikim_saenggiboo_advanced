@@ -362,8 +362,9 @@ test("Upstage route fills the length by default with creative observation guidan
     assert.doesNotMatch(systemMessage, /분량 목표보다 사실에 맞는 서술을 우선/);
     assert.match(userMessage, /본문은 559~571자 정도를 목표/);
     assert.match(userMessage, /핵심 키워드의 의미 범위 안에서/);
-    assert.match(userMessage, /다섯 관점을 각각 별도 문장으로 빠짐없이/);
-    assert.match(userMessage, /같은 활동을 서로 다른 관찰 관점으로 풀어/);
+    assert.match(userMessage, /입력과 어울리는 관점을 골라 문장마다 서로 다른 내용을 담음/);
+    assert.match(userMessage, /이미 쓴 내용을 다른 말로 되풀이하지 않음/);
+    assert.doesNotMatch(userMessage, /다섯 관점을 각각 별도 문장으로 빠짐없이/);
     assert.doesNotMatch(userMessage, /분량 목표보다 사실에 맞는 서술을 우선/);
 });
 

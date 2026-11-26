@@ -9,6 +9,7 @@ import { fetchStream, AVAILABLE_MODELS, DEFAULT_MODEL, getModelOptionLabel, isLi
 import { fetchNvidiaCompletion } from "../../utils/nvidiaFetch";
 import { fetchOpenAICompletion } from "../../utils/openAIFetch";
 import { fetchUpstageCompletion } from "../../utils/upstageFetch";
+import { fetchRepetitionCheck } from "../../utils/repetitionCheck";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import StrictFactsToggle from "../../components/StrictFactsToggle";
@@ -518,6 +519,7 @@ ${lengthInstruction}
                 forbiddenTerms: [clubName, student.name],
                 requiredContentGroups: solarRequiredContentGroups,
                 strictFacts: useStrictFacts,
+                checkRepetition: fetchRepetitionCheck,
             };
             const runLocalGeneration = (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
                 attempt,
