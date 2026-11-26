@@ -131,7 +131,7 @@ function buildSystemMessage(additionalInstructions, outputType = "record", stric
     return strictFacts ? `${systemMessage}\n\n${getExpansionFrameworkGuideline(true)}` : systemMessage;
 }
 
-function normalizeSolarPrompt(prompt, targetChars, strictFacts = false) {
+function normalizeSolarPrompt(prompt, targetChars, strictFacts, outputType) {
     const source = String(prompt || "");
     if (strictFacts && source.startsWith("아래 글은 내부 규칙 검증에서 실패했습니다.")) return source;
 
@@ -142,7 +142,9 @@ function normalizeSolarPrompt(prompt, targetChars, strictFacts = false) {
     const minChars = Math.floor(maxChars * 0.95);
     const preferredMaxChars = Math.max(minChars, Math.floor(maxChars * 0.97));
     const expansionCoverage = maxChars >= 500
-        ? "- 활동이 네 개이면 활동마다 핵심 수행·성취를 담은 문장과 과정·태도·피드백을 구체화한 문장을 각각 작성해 활동당 최소 두 문장으로 균등하게 서술함.\n- 수행 과정, 참여 태도, 사고 수준, 피드백 반영, 성취 수준 가운데 입력과 어울리는 관점을 골라 문장마다 서로 다른 내용을 담음."
+        ? outputType === "record"
+            ? "- 활동이 여러 개이면 활동마다 핵심 수행·성취 한 문장과 서로 다른 관찰을 담은 세부 과정 한두 문장을 균등하게 작성함. 목표 분량에 맞춰 전체를 보통 8~11문장으로 구성함.\n- 같은 행동을 표현만 바꿔 되풀이하지 않고 자료 선택, 작업 방법, 어려움과 해결, 피드백 반영 등 관찰 지점이 다른 장면을 골라 씀."
+            : "- 활동이 네 개이면 활동마다 핵심 수행·성취를 담은 문장과 과정·태도·피드백을 구체화한 문장을 각각 작성해 활동당 최소 두 문장으로 균등하게 서술함.\n- 수행 과정, 참여 태도, 사고 수준, 피드백 반영, 성취 수준 가운데 입력과 어울리는 관점을 골라 문장마다 서로 다른 내용을 담음."
         : maxChars >= 300
             ? "- 수행 과정, 사고 수준, 성취 수준의 세 관점을 각각 구분해 서술함."
             : "- 핵심 수행 과정과 성취 수준을 우선하여 간결하게 서술함.";
@@ -169,8 +171,8 @@ ${expansionCoverage}
     );
 }
 
-function buildUserMessage(prompt, additionalInstructions, targetChars, strictFacts = false) {
-    const normalizedPrompt = normalizeSolarPrompt(prompt, targetChars, strictFacts);
+function buildUserMessage(prompt, additionalInstructions, targetChars, strictFacts, outputType) {
+    const normalizedPrompt = normalizeSolarPrompt(prompt, targetChars, strictFacts, outputType);
     if (!additionalInstructions?.trim()) return normalizedPrompt;
     const instruction = additionalInstructions.trim();
     return `[최우선 규칙] 다음 사용자 추가 지침을 반드시 지켜서 작성하라: ${instruction}
@@ -214,7 +216,7 @@ async function callUpstage({ prompt, additionalInstructions, targetChars, model,
         { role: "user", content: JSON.stringify(review) },
     ] : [
         { role: "system", content: buildSystemMessage(additionalInstructions, outputType, strictFacts) },
-        { role: "user", content: buildUserMessage(prompt, additionalInstructions, targetChars, strictFacts) },
+        { role: "user", content: buildUserMessage(prompt, additionalInstructions, targetChars, strictFacts, outputType) },
     ];
     const requestBody = {
         model: config.model,

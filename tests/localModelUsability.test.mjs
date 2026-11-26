@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { findRepeatedContent, validateGeneratedText } from "../utils/generationHarness.js";
 import { getMaxTokensForLocalModel, getStandardSystemMessage } from "../utils/streamFetch.js";
 
-test("repetition check flags a five-word phrase repeated in another sentence", () => {
-    const text = "열의 이동 실험에서 타이머로 온도 변화를 기록함. 모둠에서 기록 담당을 맡아 측정 시점을 놓치지 않음. 이어서 열의 이동 실험에서 타이머로 온도 변화를 다시 살핌.";
+test("the exported heuristic reports a repeated phrase without blocking a record", () => {
+    const text = "열의 이동 실험에서 타이머로 온도 변화를 기록함. 모둠에서 기록 담당을 맡아 측정 시점을 놓치지 않음. 이어서 열의 이동 실험에서 타이머로 온도 변화를 다시 확인함.";
     assert.match(findRepeatedContent(text), /열의 이동 실험에서 타이머로 온도/);
     const validation = validateGeneratedText(text, { targetChars: 300, mode: "record" });
-    assert.ok(validation.issues.some(({ code }) => code === "repetition"));
+    assert.equal(validation.ok, true);
 });
 
 test("repetition check flags nearly identical sentences", () => {

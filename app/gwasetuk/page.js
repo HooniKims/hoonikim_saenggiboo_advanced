@@ -13,7 +13,7 @@ import { fetchRepetitionCheck } from "../../utils/repetitionCheck";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import StrictFactsToggle from "../../components/StrictFactsToggle";
-import { generateWithSilentValidation } from "../../utils/generationHarness";
+import { generateWithSilentValidation, redactForbiddenTerms } from "../../utils/generationHarness";
 import { generateWithLocalSolarFallback, getSolarFallbackNotice } from "../../utils/localSolarFallback";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { fetchSearchContext } from "../../utils/searchContextFetch";
@@ -495,6 +495,9 @@ ${lengthInstruction}
     };
 
     const generateForStudent = async (student) => {
+        const forbiddenTerms = [subjectName, student.name];
+        const privateTerms = [student.name];
+        const generationInstructions = redactForbiddenTerms(additionalInstructions, privateTerms);
         const validActivityEntries = activities
             .map((activity, originalIndex) => ({
                 text: activity.trim(),
@@ -516,6 +519,7 @@ ${lengthInstruction}
         const minTargetBytes = getMinimumTargetBytes(targetBytes);
         // '입력한 활동만으로 작성' + Solar Pro 4/Mini: 짧아도 덧붙이지 않고 생성 뒤 입력 사실과 대조함
         const strictFactMode = useStrictFacts && isFactCheckedUpstageModel(selectedModel);
+        const maxRepairAttempts = isUpstageSelected ? (!strictFactMode && targetBytes >= 1500 ? 6 : 4) : 2;
 
         // 공통 활동을 섞은 뒤에는 선택한 순서를 생성과 검증에 동일하게 적용한다.
         let selectedActivityEntries = shuffleArray(validActivityEntries);
@@ -560,8 +564,8 @@ ${lengthInstruction}
                     updateStudent(student.id, "progress", "웹 검색 보강 중...");
                     const searchResult = await fetchSearchContext({
                         subjectName,
-                        commonActivities: selectedActivityEntries.map(entry => entry.text),
-                        individualActivity: student.individualActivity,
+                        commonActivities: selectedActivityEntries.map((entry) => redactForbiddenTerms(entry.text, privateTerms)),
+                        individualActivity: redactForbiddenTerms(student.individualActivity, privateTerms),
                     });
                     searchContext = searchResult.context || "";
                     if (searchResult.query) {
@@ -586,7 +590,12 @@ ${lengthInstruction}
                 minTargetBytes,
                 targetChars: generationTargetChars,
                 mode: "record",
-                forbiddenTerms: [subjectName, student.name],
+                forbiddenTerms,
+                privateTerms,
+                lengthRepairFacts: [
+                    ...selectedActivityEntries.map(({ text, grade }, index) => `활동${index + 1} ${text} (성취도 ${grade})`),
+                    student.individualActivity,
+                ].filter(Boolean).join("\n"),
                 requiredContentGroups: solarRequiredContentGroups,
                 activityToneRules,
                 strictFacts: useStrictFacts,
@@ -597,7 +606,7 @@ ${lengthInstruction}
                 previousValidation,
                 provider: "local",
                 setProgress: (message) => updateStudent(student.id, "progress", message),
-                run: () => fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars: generationTargetChars, strictFacts: useStrictFacts }),
+                run: () => fetchStream({ prompt: nextPrompt, additionalInstructions: generationInstructions, model: selectedModel, targetChars: generationTargetChars, strictFacts: useStrictFacts }),
             });
             const generationResult = isLocalFallbackEligible
                 ? await generateWithLocalSolarFallback({
@@ -609,7 +618,7 @@ ${lengthInstruction}
                         previousValidation,
                         provider: "upstage",
                         setProgress: (message) => updateStudent(student.id, "progress", message),
-                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars: generationTargetChars, model: selectedModel, strictFacts: useStrictFacts }),
+                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions: generationInstructions, targetChars: generationTargetChars, model: selectedModel, strictFacts: useStrictFacts }),
                     }),
                 })
                 : await generateWithSilentValidation({
@@ -620,22 +629,24 @@ ${lengthInstruction}
                     stripExpandedGradeLabels: isUpstageSelected,
                     requiredContentGroups: solarRequiredContentGroups,
                     ...validationOptions,
-                    maxRepairAttempts: isUpstageSelected ? 4 : 2,
+                    maxRepairAttempts,
                     generateOnce: (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
                     attempt,
+                    maxRepairAttempts,
                     previousValidation,
                     provider: getGenerationProvider({ isNvidiaSelected, isUpstageSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
                     setProgress: (message) => updateStudent(student.id, "progress", message),
                     run: () => isNvidiaSelected
-                        ? fetchNvidiaCompletion({ prompt: nextPrompt, additionalInstructions, targetChars: generationTargetChars, model: selectedModel })
+                        ? fetchNvidiaCompletion({ prompt: nextPrompt, additionalInstructions: generationInstructions, targetChars: generationTargetChars, model: selectedModel })
                         : isUpstageSelected
                             ? fetchUpstageCompletion({
                                 prompt: nextPrompt,
-                                additionalInstructions,
+                                additionalInstructions: generationInstructions,
                                 targetChars: generationTargetChars,
                                 model: selectedModel,
                                 sourceFacts: strictFactMode
-                                    ? [...selectedActivityEntries.map((entry) => entry.text), student.individualActivity].filter(Boolean)
+                                    ? [...selectedActivityEntries.map((entry) => entry.text), student.individualActivity]
+                                        .map((fact) => redactForbiddenTerms(fact, privateTerms)).filter(Boolean)
                                     : undefined,
                                 keepTerms: strictFactMode
                                     ? [...new Set(selectedActivityEntries.flatMap((entry) => getGradeEvidence(entry.grade, useStrictFacts)))]
@@ -643,8 +654,8 @@ ${lengthInstruction}
                                 strictFacts: useStrictFacts,
                             })
                         : appliedOpenAIKey
-                            ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions, apiKey: appliedOpenAIKey, targetChars: generationTargetChars, model: selectedOpenAIModel })
-                            : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars: generationTargetChars, strictFacts: useStrictFacts }),
+                            ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions: generationInstructions, apiKey: appliedOpenAIKey, targetChars: generationTargetChars, model: selectedOpenAIModel })
+                            : fetchStream({ prompt: nextPrompt, additionalInstructions: generationInstructions, model: selectedModel, targetChars: generationTargetChars, strictFacts: useStrictFacts }),
                     }),
                 });
 

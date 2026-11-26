@@ -13,7 +13,7 @@ import { fetchRepetitionCheck } from "../../utils/repetitionCheck";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import StrictFactsToggle from "../../components/StrictFactsToggle";
-import { generateWithSilentValidation } from "../../utils/generationHarness";
+import { generateWithSilentValidation, redactForbiddenTerms } from "../../utils/generationHarness";
 import { generateWithLocalSolarFallback, getSolarFallbackNotice } from "../../utils/localSolarFallback";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { fetchSearchContext } from "../../utils/searchContextFetch";
@@ -260,6 +260,9 @@ ${lengthInstruction}
     };
 
     const generateForStudent = async (student) => {
+        const forbiddenTerms = [student.name];
+        const privateTerms = [student.name];
+        const generationInstructions = redactForbiddenTerms(additionalInstructions, privateTerms);
         // For behavior, we allow generation even if observation is empty (using default prompt)
         // But let's require at least some input if the user wants specific results.
         // However, to be consistent with "AI generation", we can generate generic good behavior if empty.
@@ -278,7 +281,7 @@ ${lengthInstruction}
                     const searchResult = await fetchSearchContext({
                         subjectName: "행동특성 및 종합의견",
                         commonActivities: [],
-                        individualActivity: student.observation,
+                        individualActivity: redactForbiddenTerms(student.observation, privateTerms),
                     });
                     searchContext = searchResult.context || "";
                     if (searchResult.query) {
@@ -295,7 +298,9 @@ ${lengthInstruction}
                 minTargetBytes,
                 targetChars,
                 mode: "record",
-                forbiddenTerms: [student.name],
+                forbiddenTerms,
+                privateTerms,
+                lengthRepairFacts: student.observation,
                 strictFacts: useStrictFacts,
                 checkRepetition: fetchRepetitionCheck,
             };
@@ -304,7 +309,7 @@ ${lengthInstruction}
                 previousValidation,
                 provider: "local",
                 setProgress: (message) => updateStudent(student.id, "progress", message),
-                run: () => fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars, strictFacts: useStrictFacts }),
+                run: () => fetchStream({ prompt: nextPrompt, additionalInstructions: generationInstructions, model: selectedModel, targetChars, strictFacts: useStrictFacts }),
             });
             const generationResult = isLocalFallbackEligible
                 ? await generateWithLocalSolarFallback({
@@ -316,7 +321,7 @@ ${lengthInstruction}
                         previousValidation,
                         provider: "upstage",
                         setProgress: (message) => updateStudent(student.id, "progress", message),
-                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars, model: selectedModel, strictFacts: useStrictFacts }),
+                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions: generationInstructions, targetChars, model: selectedModel, strictFacts: useStrictFacts }),
                     }),
                 })
                 : await generateWithSilentValidation({
@@ -333,19 +338,19 @@ ${lengthInstruction}
                     provider: getGenerationProvider({ isNvidiaSelected, isUpstageSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
                     setProgress: (message) => updateStudent(student.id, "progress", message),
                     run: () => isNvidiaSelected
-                        ? fetchNvidiaCompletion({ prompt: nextPrompt, additionalInstructions, targetChars, model: selectedModel })
+                        ? fetchNvidiaCompletion({ prompt: nextPrompt, additionalInstructions: generationInstructions, targetChars, model: selectedModel })
                         : isUpstageSelected
                             ? fetchUpstageCompletion({
                                 prompt: nextPrompt,
-                                additionalInstructions,
+                                additionalInstructions: generationInstructions,
                                 targetChars,
                                 model: selectedModel,
-                                sourceFacts: strictFactMode ? [student.observation] : undefined,
+                                sourceFacts: strictFactMode ? [redactForbiddenTerms(student.observation, privateTerms)] : undefined,
                                 strictFacts: useStrictFacts,
                             })
                         : appliedOpenAIKey
-                            ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions, apiKey: appliedOpenAIKey, targetChars, model: selectedOpenAIModel })
-                            : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars, strictFacts: useStrictFacts }),
+                            ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions: generationInstructions, apiKey: appliedOpenAIKey, targetChars, model: selectedOpenAIModel })
+                            : fetchStream({ prompt: nextPrompt, additionalInstructions: generationInstructions, model: selectedModel, targetChars, strictFacts: useStrictFacts }),
                     }),
                 });
 

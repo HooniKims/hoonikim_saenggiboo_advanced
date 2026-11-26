@@ -86,14 +86,13 @@ test("all generation pages fill the length by default and accept short factual r
 });
 
 test("record generation pages give Solar extra repair attempts without changing other models", () => {
-    for (const relativePath of [
-        "app/gwasetuk/page.js",
-        "app/club/page.js",
-        "app/behavior/page.js",
-    ]) {
+    for (const relativePath of ["app/club/page.js", "app/behavior/page.js"]) {
         const source = readPage(relativePath);
         assert.match(source, /generateWithSilentValidation\(\{[\s\S]*?maxRepairAttempts:\s*isUpstageSelected\s*\?\s*4\s*:\s*2/);
     }
+    const subject = readPage("app/gwasetuk/page.js");
+    assert.match(subject, /const maxRepairAttempts = isUpstageSelected \? \(!strictFactMode && targetBytes >= 1500 \? 6 : 4\) : 2;/);
+    assert.match(subject, /generateWithSilentValidation\(\{[\s\S]*?\n\s+maxRepairAttempts,/);
 });
 
 test("all generation pages route the selected Solar model through the Upstage API", () => {

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { generateWithSilentValidation } from "../utils/generationHarness.js";
+import { getUtf8ByteLength } from "../utils/textProcessor.js";
 import { parseRepetitionPairs, describeRepetitionPairs } from "../utils/repetitionJudge.js";
 import { POST } from "../app/api/repetition-check/route.js";
 
@@ -58,21 +59,82 @@ test("after removing a repeat, the missing length is filled by appending only ne
     assert.equal(result.text, REVISED);
 });
 
-test("the judge is not asked on the last attempt so repetition never ends generation as a failure", async () => {
+test("an append response can echo the draft without hiding later new sentences behind the byte cap", async () => {
+    const base = DRAFT.slice(0, DRAFT.lastIndexOf(" 측정한"));
+    const addition = "기록이 빠진 구간을 다시 확인하며 자료의 정확성을 높임.";
+    const expected = `${base} ${addition}`;
+    const prompts = [];
+    const result = await generateWithSilentValidation({
+        prompt: "과세특을 작성하세요.",
+        targetChars: 300,
+        minTargetBytes: getUtf8ByteLength(expected),
+        maxTargetBytes: getUtf8ByteLength(expected) + 10,
+        acceptLengthOnlyResult: false,
+        preserveTextOnLengthRepair: true,
+        maxRepairAttempts: 1,
+        generateOnce: async (prompt) => {
+            prompts.push(prompt);
+            return prompts.length === 1 ? base : expected;
+        },
+    });
+    assert.equal(result.text, expected);
+    assert.equal(result.validation.ok, true);
+    assert.match(prompts[1], /new text alone has a \d+byte budget/);
+});
+
+test("the judge removes the final attempt's repeated sentence and returns a length warning", async () => {
     let checks = 0;
     const result = await generateWithSilentValidation({
         prompt: "과세특을 작성하세요.",
         targetChars: 300,
         mode: "record",
         maxRepairAttempts: 0,
+        minTargetBytes: getUtf8ByteLength(DRAFT),
+        acceptLengthOnlyResult: false,
         checkRepetition: async () => {
             checks += 1;
             return { pairs: [[3, 4]] };
         },
         generateOnce: async () => DRAFT,
     });
-    assert.equal(checks, 0);
+    assert.equal(checks, 1);
+    assert.equal(result.text, DRAFT.slice(0, DRAFT.lastIndexOf(" 측정한")));
+    assert.equal(result.acceptedWithLengthWarning, true);
+    assert.deepEqual(result.validation.issues.map(({ code }) => code), ["under_min_bytes"]);
+});
+
+test("local cleanup keeps distinct sentences with a shared phrase and removes near duplicates", async () => {
+    const first = "열의 이동 실험에서 측정한 수치를 선그래프로 나타내고 두 물질의 변화를 비교함.";
+    const distinct = "열의 이동 실험에서 측정한 수치를 근거로 오차 원인을 토론하고 기록 방식을 수정함.";
+    const duplicate = "열의 이동 실험에서 측정한 수치를 선그래프로 나타내어 두 물질의 변화를 비교함.";
+    const result = await generateWithSilentValidation({
+        prompt: "과세특을 작성하세요.",
+        minTargetChars: 0,
+        maxRepairAttempts: 0,
+        generateOnce: async () => `${first} ${distinct} ${duplicate}`,
+        checkRepetition: async () => { throw new Error("429"); },
+    });
+    assert.equal(result.text, `${first} ${distinct}`);
+    assert.equal(result.validation.ok, true);
+});
+
+test("the judge is skipped for blocking issues and invalid pairs cannot remove the whole paragraph", async () => {
+    let calls = 0;
+    const result = await generateWithSilentValidation({
+        prompt: "과세특을 작성하세요.",
+        minTargetChars: 0,
+        maxRepairAttempts: 1,
+        requiredContentGroups: [{ label: "비교", terms: ["두 물질"] }],
+        generateOnce: async (_prompt, { attempt }) => attempt === 0
+            ? "온도 변화를 기록하였음. 측정값을 선그래프로 나타냄."
+            : DRAFT,
+        checkRepetition: async () => {
+            calls += 1;
+            return { pairs: [[0, 1], [2, 1], [3, 3], [2, 9]] };
+        },
+    });
     assert.equal(result.text, DRAFT);
+    assert.equal(calls, 1);
 });
 
 test("repetition-check route asks Solar Mini with reasoning off and never fails the request", async () => {
@@ -113,4 +175,16 @@ test("record pages pass the repetition judge into generation", () => {
     }
     const letter = readFileSync(new URL("../app/letter/page.js", import.meta.url), "utf8");
     assert.doesNotMatch(letter, /checkRepetition/);
+});
+
+test("record pages redact forbidden terms from inputs that bypass the shared prompt harness", () => {
+    for (const route of ["gwasetuk", "club", "behavior"]) {
+        const source = readFileSync(new URL(`../app/${route}/page.js`, import.meta.url), "utf8");
+        assert.match(source, /const forbiddenTerms = \[[^\]]*student\.name\];/, route);
+        assert.match(source, /const privateTerms = \[student\.name\];/, route);
+        assert.match(source, /const generationInstructions = redactForbiddenTerms\(additionalInstructions, privateTerms\);/, route);
+        assert.match(source, /forbiddenTerms,\s*privateTerms,/, route);
+        assert.doesNotMatch(source, /prompt:\s*nextPrompt,\s*additionalInstructions\s*,/, route);
+        assert.match(source, /sourceFacts: strictFactMode[\s\S]*?redactForbiddenTerms\(/, route);
+    }
 });

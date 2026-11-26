@@ -85,7 +85,6 @@ const ISSUE_LABELS = {
     summary_closing: "요약/마무리 표현 포함",
     meta_text: "메타 설명 포함",
     prompt_leak: "작성 지시문이 본문에 섞임",
-    repetition: "같은 내용 반복",
     list_or_title: "목록/제목 형식 포함",
     incomplete_sentence: "문장 종결 불완전",
     sentence_spacing: "문장 마침표/띄어쓰기 오류",
@@ -165,6 +164,7 @@ function formatSentenceSpacing(text, mode = "record") {
 const REPEATED_EOJEOL_COUNT = 5;
 const SIMILAR_SENTENCE_RATIO = 0.65;
 const SIMILAR_SENTENCE_MIN_CHARS = 20;
+const REPEATED_SENTENCE_REMOVAL_RATIO = 0.8;
 
 function getCharacterBigrams(sentence) {
     const compact = sentence.replace(/[\s.,!?]/g, "");
@@ -209,6 +209,43 @@ export function findRepeatedContent(text) {
         }
     }
     return "";
+}
+
+async function removeRepeatedSentences(text, checkRepetition) {
+    const sentences = splitCompleteSentences(text);
+    if (sentences.length < 2) return text;
+
+    const repeatedIndexes = new Set();
+    for (let index = 1; index < sentences.length; index += 1) {
+        for (let earlier = 0; earlier < index; earlier += 1) {
+            if (!repeatedIndexes.has(earlier)
+                && getBigramSimilarity(sentences[earlier], sentences[index]) >= REPEATED_SENTENCE_REMOVAL_RATIO) {
+                repeatedIndexes.add(index);
+                break;
+            }
+        }
+    }
+
+    if (typeof checkRepetition === "function") {
+        try {
+            // 원래 문장 순서를 넘겨 판정의 문장 번호와 삭제할 위치를 일치시킨다.
+            const { pairs } = await checkRepetition(text) || {};
+            for (const pair of Array.isArray(pairs) ? pairs : []) {
+                if (!Array.isArray(pair)) continue;
+                const [first, second] = pair.map(Number);
+                if (Number.isInteger(first) && Number.isInteger(second)
+                    && first >= 1 && first < second && second <= sentences.length) {
+                    repeatedIndexes.add(second - 1);
+                }
+            }
+        } catch {
+            // 외부 판정을 받지 못하면 문장 유사도로 확인한 결과만 적용한다.
+        }
+    }
+
+    if (!repeatedIndexes.size || repeatedIndexes.size >= sentences.length) return text;
+    console.info(`[반복 정리] 같은 내용을 되풀이한 문장 ${repeatedIndexes.size}개를 지움`);
+    return sentences.filter((_, index) => !repeatedIndexes.has(index)).join(" ");
 }
 
 function addIssue(issues, code, detail = "") {
@@ -258,6 +295,20 @@ function getForbiddenTerms(forbiddenTerms) {
     return (forbiddenTerms || [])
         .map((term) => String(term || "").trim())
         .filter((term) => term.length >= 2);
+}
+
+// AI 요청에 학생 이름이 들어가지 않게 지운다. 두 글자 이름(하나, 보람 등)은 일반 단어와 겹쳐
+// 활동 내용을 망가뜨리므로 지우지 않고, 결과 검증(forbidden_term)과 교사 확인에 맡긴다.
+// 과목명·동아리명은 개인정보가 아니므로 여기로 넘기지 않는다(privateTerms 에는 학생 이름만).
+export function redactForbiddenTerms(text, privateTerms) {
+    let redacted = String(text ?? "");
+    const terms = getForbiddenTerms(privateTerms)
+        .filter((term) => term.length >= 3)
+        .sort((left, right) => right.length - left.length);
+    for (const term of terms) {
+        redacted = redacted.replaceAll(term, "");
+    }
+    return terms.length ? redacted.replace(/[ \t]{2,}/g, " ") : redacted;
 }
 
 function getRuleTerms(terms) {
@@ -515,11 +566,6 @@ export function validateGeneratedText(text, options = {}) {
         addIssue(issues, "prompt_leak", "등급 설명이나 작성 지시를 옮기지 말고 학생의 수행으로 서술");
     }
 
-    const repeatedContent = mode === "record" ? findRepeatedContent(trimmed) : "";
-    if (repeatedContent) {
-        addIssue(issues, "repetition", `${repeatedContent}. 같은 구절과 같은 내용을 되풀이하지 말고 다른 관찰 관점으로 서술`);
-    }
-
     if (LIST_OR_TITLE_PATTERN.test(source)) {
         addIssue(issues, "list_or_title");
     }
@@ -534,33 +580,79 @@ export function validateGeneratedText(text, options = {}) {
     };
 }
 
-export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars, maxTargetBytes = 0, minTargetBytes = 0, minTargetChars = 0, mode = "record", forbiddenTerms = [], requiredTerms = [], requiredContentGroups = [], bannedTerms = [], activityToneRules = [], preserveTextOnLengthRepair = false, strictFacts = false }) {
+export function buildRepairPrompt({ text, issues, sourcePrompt = "", lengthRepairFacts = "", targetChars, maxTargetBytes = 0, minTargetBytes = 0, minTargetChars = 0, mode = "record", forbiddenTerms = [], requiredTerms = [], requiredContentGroups = [], bannedTerms = [], activityToneRules = [], preserveTextOnLengthRepair = false, strictFacts = false, privateTerms = [] }) {
     const maxAllowed = clampTargetChars(targetChars);
     const minAllowed = Math.max(0, Math.min(Math.floor(Number(minTargetChars) || 0), maxAllowed));
     const minAllowedBytes = Math.max(0, Math.floor(Number(minTargetBytes) || 0));
     const maxAllowedBytes = Math.max(0, Math.floor(Number(maxTargetBytes) || 0));
     const currentBytes = getUtf8ByteLength(text);
     const missingBytes = Math.max(0, minAllowedBytes - currentBytes);
+    const remainingBytes = Math.max(0, maxAllowedBytes - currentBytes - 1);
     const issueCodes = new Set((issues || []).map((issue) => issue.code));
     const isLengthShortfall = issueCodes.has("under_min_bytes") || issueCodes.has("under_min_chars");
     const hasMissingRequiredContent = issueCodes.has("missing_required_content") || issueCodes.has("activity_order");
     const shouldPreserveShortfallText = mode === "record" && preserveTextOnLengthRepair
         && isLengthShortfall
         && hasOnlyNonBlockingGenerationIssues(issues, mode);
+    if (shouldPreserveShortfallText && lengthRepairFacts) {
+        const sentenceCount = Math.min(8, Math.max(3, Math.ceil(missingBytes / 100) + 2));
+        const sentenceLength = Math.min(55, Math.max(16, Math.floor((remainingBytes || 130) / 3)));
+        return redactForbiddenTerms(`기존 본문은 시스템이 유지합니다. 아래 내용에 없던 관찰 문장 후보를 ${sentenceCount}개 쓰세요.
+분량이 ${missingBytes}byte 부족합니다. 붙일 문장은 시스템이 고르므로 후보마다 약 ${sentenceLength}자 내외의 짧은 완결문으로 쓰세요.
+- 원래 입력의 활동 안에서 아직 쓰지 않은 관찰만 한 문장에 하나씩 제안함. 같은 결과를 바꿔 말하거나 본문을 처음부터 다시 쓰지 않음.
+- 활동마다 이미 쓴 관찰을 확인한 뒤, 서로 다른 준비 방법, 판단 근거, 피드백 반영, 작업 방법, 다음 관찰 등에서 고름.
+- 해당 활동을 알 수 있는 핵심어를 쓰고, 지정된 성취 수준과 모순되는 평가나 같은 평가 문구를 덧붙이지 않음.
+- ${strictFacts ? "입력에 명시된 사실만 사용함." : "입력의 범위에서 세부 과정을 보완하되 새 수치, 점수, 기관, 실험 결과를 단정하지 않음."}
+- 학생 이름, 과목명, 동아리명 같은 고유명사와 등급 기호를 쓰지 않음.
+- 각 문장을 현재형 명사 종결어미와 마침표로 끝냄. 번호나 제목 없이 새 문장만 출력함.
+
+[원래 입력]
+${lengthRepairFacts}
+
+[기존 본문]
+${text}
+
+기존 본문의 문장은 출력하지 말고 새 관찰 문장 후보만 반환하세요.`, privateTerms);
+    }
+    if (mode === "record" && !strictFacts && preserveTextOnLengthRepair && lengthRepairFacts && activityToneRules.length
+        && (hasMissingRequiredContent || issueCodes.has("grade_tone_mismatch"))) {
+        const activities = getActivityToneRules(activityToneRules).map(({ label, grade, anchors, evidence }) =>
+            `- ${label}(${grade}): 첫 문장에 '${anchors[0]}'과 성취 표현(${evidence?.slice(0, 3).join(" / ")}) 중 하나를 자연스럽게 씀`,
+        ).join("\n");
+        const problems = (issues || [])
+            .filter(({ code }) => code === "missing_required_content" || code === "grade_tone_mismatch" || code === "activity_order")
+            .map(({ detail }) => `- ${detail}`).join("\n");
+        return redactForbiddenTerms(`과세특 전문을 보정하세요. 아래 입력의 활동을 지정된 성취 수준과 함께 빠짐없이 씁니다.
+- 활동별 문장을 연달아 배치하고 다음 활동으로 넘어간 뒤에는 앞 활동의 평가를 덧붙이지 않음.
+- 활동마다 수행·성취 한 문장과 서로 다른 준비, 판단, 방법, 확인을 서술한 두 문장을 씀.
+- 이미 쓴 행동을 다시 말하거나 입력에 없는 수치, 점수, 기관, 구체적인 실험 결과를 단정하지 않음.
+- 글 전체를 ${minAllowedBytes}~${maxAllowedBytes}byte에 가깝게 작성함. 현재형 명사 종결과 마침표로 끝냄.
+- 학생 이름, 과목명, 활동 번호, 등급 기호, 지시 설명을 쓰지 않음. 줄바꿈 없이 본문만 출력함.
+
+[입력 활동]
+${lengthRepairFacts}
+
+[활동별 기준]
+${activities}
+
+[이번에 보완할 부분]
+${problems}`, privateTerms);
+    }
     const visibleRange = shouldPreserveShortfallText
         ? {
             min: Math.max(1, Math.ceil(missingBytes / 3)),
             max: Math.max(1, Math.ceil(missingBytes / 2)),
         }
         : getByteTargetVisibleRange(maxAllowed, minAllowedBytes);
+    const lengthSubject = shouldPreserveShortfallText ? "the new sentences only" : `the ${maxAllowedBytes || maxAllowed}byte setting`;
     const byteShortfallText = minAllowedBytes > 0 && missingBytes > 0
-        ? `\n[Byte shortfall]\n- Current bytes: ${currentBytes}byte\n- Missing bytes: ${missingBytes}byte\n- Write ${visibleRange.min}-${visibleRange.max} Korean visible characters for the ${maxAllowedBytes || maxAllowed}byte setting.\n- Add enough concrete Korean content while staying under ${maxAllowedBytes || maxAllowed}byte.\n`
+        ? `\n[Byte shortfall]\n- Current bytes: ${currentBytes}byte\n- Missing bytes: ${missingBytes}byte\n- Write ${visibleRange.min}-${visibleRange.max} Korean visible characters for ${lengthSubject}.\n- Add enough concrete Korean content while staying under ${maxAllowedBytes || maxAllowed}byte.${shouldPreserveShortfallText && maxAllowedBytes ? ` The new text alone has a ${remainingBytes}byte budget.` : ""}\n`
         : "";
     const issueText = `${(issues || [])
-        .map((issue) => `- ${issue.message}${issue.detail ? `: ${issue.detail}` : ""}`)
+        .map((issue) => `- ${issue.message}${issue.detail && issue.code !== "forbidden_term" ? `: ${issue.detail}` : ""}`)
         .join("\n")}${byteShortfallText}`;
     const forbiddenText = getForbiddenTerms(forbiddenTerms).length
-        ? `\n- 다음 용어는 출력하지 않음: ${getForbiddenTerms(forbiddenTerms).join(", ")}`
+        ? "\n- 학생 이름, 과목명, 동아리명 같은 고유명사는 쓰지 않음"
         : "";
     const requiredText = getRuleTerms(requiredTerms).length
         ? `\n- 다음 설정 용어는 반드시 포함함: ${getRuleTerms(requiredTerms).join(", ")}`
@@ -600,10 +692,6 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
             ? "누락된 활동이 뒤에서 잘리지 않도록 기존 글을 그대로 이어 붙이지 말고, 모든 필수 활동에 분량을 균등하게 나누어 전체 본문을 다시 작성하세요. 첫 문장을 공통 활동1로 시작하고 나머지 공통 활동을 입력 순서대로 서술하세요."
         : mode === "letter"
             ? "기존 조언을 반복하지 말고, 각 조언에 서로 다른 구체적 실천 방법을 담아 전체 본문을 다시 작성하세요."
-        : issueCodes.has("repetition")
-            ? strictFacts
-                ? "같은 내용을 되풀이한 문장을 하나로 합쳐 전체 본문을 다시 작성하세요. 새 사실은 더하지 말고 다른 문장과 평가 표현은 유지하세요."
-                : "같은 내용을 되풀이한 문장을 하나로 합치고, 줄어든 분량은 앞에 없던 새 관찰(동기, 방법, 어려움과 해결, 변화, 배운 점)로 채워 전체 본문을 다시 작성하세요. 다른 문장과 평가 표현은 유지하세요."
             : "의미는 유지하되 규칙에 맞게 다시 작성하세요.";
 
     // 기본은 분량을 채우도록 창작·보완을 허용하고, '입력한 활동만으로 작성'을 체크하면 입력 사실만 쓴다.
@@ -623,15 +711,25 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
     const existingTextSection = hasMissingRequiredContent
         ? ""
         : `\n[수정할 글]\n${text}`;
+    const sourceConditions = shouldPreserveShortfallText
+        ? sourcePrompt
+            .replace(/<분량 제한>[\s\S]*?(?=\n\s*(?:<출력 형식>|\[출력 형식\]|<좋은 예시>|\[좋은 예시\])|\s*$)/, "")
+            .replace(/^\[활동별 할당량\].*$/m, "")
+        : sourcePrompt;
+    const lengthRule = shouldPreserveShortfallText
+        ? `추가할 새 문장만 ${missingBytes || 1}byte 정도 작성함. 기존 본문의 시작·활동 순서·분량은 이미 작성된 전체 본문에 적용되며 새 문장마다 다시 적용하지 않음. 한 활동을 덧붙일 때 그 활동의 핵심어를 새 문장 안에 명시함. 새 문장마다 준비 방법, 어려움을 다룬 방법, 검토한 근거 등 기존에 없는 관찰을 하나씩 담음.`
+        : maxAllowedBytes > 0 && minAllowedBytes > 0
+            ? `${minAllowedBytes}byte 이상 ${maxAllowedBytes}byte 이하를 반드시 맞춤`
+            : minAllowedBytes > 0 ? `${minAllowedBytes}byte 이상을 반드시 채움` : "선택한 글자수 제한에 충분히 가깝게 작성";
 
-    return `아래 글은 내부 규칙 검증에서 실패했습니다. ${shortfallRewriteInstruction}
+    return redactForbiddenTerms(`아래 글은 내부 규칙 검증에서 실패했습니다. ${shortfallRewriteInstruction}
 
 [규칙 위반]
 ${issueText || "- 규칙 위반"}
 
 [수정 규칙]
-- ${minAllowed > 0 ? `${minAllowed}자 이상 ${maxAllowed}자 이하로 작성` : `${maxAllowed}자 이하로 작성`}
-- ${maxAllowedBytes > 0 && minAllowedBytes > 0 ? `${minAllowedBytes}byte 이상 ${maxAllowedBytes}byte 이하를 반드시 맞춤` : minAllowedBytes > 0 ? `${minAllowedBytes}byte 이상을 반드시 채움` : "선택한 글자수 제한에 충분히 가깝게 작성"}
+- ${lengthRule}
+${shouldPreserveShortfallText ? "" : `- ${minAllowed > 0 ? `${minAllowed}자 이상 ${maxAllowed}자 이하로 작성` : `${maxAllowed}자 이하로 작성`}`}
 ${shouldPreserveShortfallText ? "- 기존 본문과 겹치지 않는 새 관찰 문장만 작성해 부족한 분량을 보충함" : ""}
 ${expansionRules}
 - 원래 작성 조건에 개인별 활동 내용이 있으면 그 수행, 역할, 관찰 단서를 우선 활용해 구체화함
@@ -644,7 +742,7 @@ ${endingInstruction}${sentenceSpacingInstruction}${modeSpecificInstruction}${for
 ${expansionFramework}
 
 [원래 작성 조건]
-${sourcePrompt || "(원래 작성 조건 없음)"}${existingTextSection}`;
+${sourceConditions || "(원래 작성 조건 없음)"}${existingTextSection}${shouldPreserveShortfallText ? "\n\n[반환 형식]\n위 본문을 복사하지 말고, 바로 뒤에 붙일 새 관찰 문장만 출력하세요." : ""}`, privateTerms);
 }
 
 function truncateToMaxBytes(text, maxTargetBytes) {
@@ -798,6 +896,28 @@ function splitCompleteSentences(text) {
         .split(/(?<=[.!?])\s+/)
         .map((sentence) => sentence.trim())
         .filter(Boolean);
+}
+
+function appendNewSentences(base, rawText, validationOptions, sanitizeOptions) {
+    const { mode } = validationOptions;
+    const sentences = splitCompleteSentences(base);
+    const additions = splitCompleteSentences(finalizeGeneratedText(rawText, MAX_CHARS, 0, mode, sanitizeOptions))
+        .map((sentence) => sentence
+            .replace(/\*\*/g, "")
+            .replace(/^\s*(?:[-•*·▪]+|\(?\d+[.)]|(?:후보|문장)\s*\d*\s*[:：.)]?)\s*/, "")
+            .trim())
+        .filter(Boolean);
+    for (const sentence of additions) {
+        if (sentences.some((existing) => getBigramSimilarity(existing, sentence) >= REPEATED_SENTENCE_REMOVAL_RATIO)) {
+            continue;
+        }
+        const candidate = [...sentences, sentence].join(" ");
+        const validation = validateGeneratedText(candidate, validationOptions);
+        if (validation.ok || hasOnlyNonBlockingGenerationIssues(validation.issues, mode)) {
+            sentences.push(sentence);
+        }
+    }
+    return sentences.join(" ");
 }
 
 function normalizedSeed(text) {
@@ -987,21 +1107,29 @@ export async function generateWithSilentValidation({
     requiredContentGroups = [],
     activityToneRules = [],
     preserveTextOnLengthRepair = false,
+    lengthRepairFacts = "",
     preferBestCandidateOnFailure = false,
     stripExpandedGradeLabels = false,
     strictFacts = false,
     checkRepetition = null,
+    privateTerms = [],
 }) {
     if (typeof generateOnce !== "function") {
         throw new Error("generateOnce 함수가 필요합니다.");
     }
 
-    let nextPrompt = prompt;
+    let nextPrompt = mode === "record" ? redactForbiddenTerms(prompt, privateTerms) : prompt;
     let lastText = "";
     let lastValidation = null;
     let bestCandidate = null;
+    let lengthOnlyBest = null;
     const hasByteTarget = Number(minTargetBytes) > 0 || Number(maxTargetBytes) > 0;
     const effectiveMinTargetChars = minTargetChars ?? (hasByteTarget ? 0 : getMinimumTargetChars(targetChars));
+    const validationOptions = {
+        forbiddenTerms, maxTargetBytes, minTargetBytes, minTargetChars: effectiveMinTargetChars,
+        mode, targetChars, requiredTerms, bannedTerms, requiredAdviceDomains,
+        requiredContentGroups, activityToneRules,
+    };
     const letterRepairOptions = {
         mode, requiredTerms, targetChars, maxTargetBytes, minTargetBytes,
         minTargetChars: effectiveMinTargetChars, requiredAdviceDomains,
@@ -1018,12 +1146,10 @@ export async function generateWithSilentValidation({
             && attempt > 0
             && lastText
             && hasOnlyNonBlockingGenerationIssues(lastValidation?.issues || [], mode);
-        const generatedText = shouldAppendLengthRepair ? `${lastText} ${rawText}` : rawText;
-        let text = finalizeGeneratedText(generatedText, targetChars, maxTargetBytes, mode, {
-            bannedTerms,
-            requiredTerms,
-            stripExpandedGradeLabels,
-        });
+        const sanitizeOptions = { bannedTerms, forbiddenTerms, requiredTerms, stripExpandedGradeLabels };
+        let text = shouldAppendLengthRepair
+            ? appendNewSentences(lastText, rawText, validationOptions, sanitizeOptions)
+            : finalizeGeneratedText(rawText, targetChars, maxTargetBytes, mode, sanitizeOptions);
         if (mode === "letter") {
             text = finalizeGeneratedText(
                 repairLetterText(text, letterRepairOptions),
@@ -1033,45 +1159,28 @@ export async function generateWithSilentValidation({
                 { bannedTerms, requiredTerms },
             );
         }
-        const validationOptions = {
-            forbiddenTerms,
-            maxTargetBytes,
-            minTargetBytes,
-            minTargetChars: effectiveMinTargetChars,
-            mode,
-            targetChars,
-            requiredTerms,
-            bannedTerms,
-            requiredAdviceDomains,
-            requiredContentGroups,
-            activityToneRules,
-            preserveTextOnLengthRepair,
-        };
         let validation = validateGeneratedText(text, validationOptions);
-        // 같은 내용을 다른 말로 되풀이했는지는 뜻을 읽어야 해서 외부 판정(Solar Mini)에 맡긴다.
-        // 짚은 뒤 문장은 코드가 바로 지운다. 모자란 분량은 이어 쓰기 단계가 '겹치지 않는 새 문장'으로 채운다.
-        // 다시 쓸 기회가 남아 있고 다른 규칙은 통과했을 때만 묻고, 마지막 시도에서는 묻지 않는다.
-        if (mode === "record" && typeof checkRepetition === "function" && attempt < maxRepairAttempts
-            && (validation.ok || hasOnlyNonBlockingGenerationIssues(validation.issues, mode))) {
-            let judged = null;
-            try {
-                judged = await checkRepetition(text);
-            } catch {
-                judged = null;
-            }
-            const repeatedIndexes = new Set((Array.isArray(judged?.pairs) ? judged.pairs : [])
-                .map((pair) => Number(pair?.[1]) - 1)
-                .filter((index) => Number.isInteger(index) && index >= 0));
-            const sentences = text.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter(Boolean);
-            const keptSentences = sentences.filter((_, index) => !repeatedIndexes.has(index));
-            if (keptSentences.length > 0 && keptSentences.length < sentences.length) {
-                console.info(`[반복 정리] 같은 내용을 되풀이한 문장 ${sentences.length - keptSentences.length}개를 지움`);
-                text = keptSentences.join(" ");
-                validation = validateGeneratedText(text, validationOptions);
+        const eligibleForRepetitionCleanup = mode === "record"
+            && (validation.ok || hasOnlyNonBlockingGenerationIssues(validation.issues, mode));
+        const cleanedText = eligibleForRepetitionCleanup ? await removeRepeatedSentences(text, checkRepetition) : text;
+        let removedRepetition = false;
+        if (cleanedText !== text) {
+            // 활동마다 비슷한 틀로 쓴 문장이 지워져 필수 활동·성취 표현이 빠지면 지우지 않는다.
+            const cleanedValidation = validateGeneratedText(cleanedText, validationOptions);
+            if (cleanedValidation.ok || hasOnlyNonBlockingGenerationIssues(cleanedValidation.issues, mode)) {
+                text = cleanedText;
+                validation = cleanedValidation;
+                removedRepetition = true;
+            } else {
+                console.info("[반복 정리] 지우면 필수 내용이 빠져 지우지 않음");
             }
         }
         console.info(`[생성 검증] 시도=${attempt + 1} 원문=${getUtf8ByteLength(rawText)}byte 최종=${getUtf8ByteLength(text)}byte 검증=${validation.ok ? "통과" : "재시도"} 문제=${validation.issues.map((issue) => issue.code).join(",") || "없음"}`);
         const candidate = { text, validation };
+        if (hasOnlyNonBlockingGenerationIssues(validation.issues, mode)
+            && (!lengthOnlyBest || getUtf8ByteLength(text) > getUtf8ByteLength(lengthOnlyBest.text))) {
+            lengthOnlyBest = candidate;
+        }
         if (preferBestCandidateOnFailure && isBetterGeneratedCandidate(candidate, bestCandidate, minTargetBytes, mode)) {
             bestCandidate = candidate;
         }
@@ -1085,6 +1194,19 @@ export async function generateWithSilentValidation({
             };
         }
 
+        if (removedRepetition && attempt === maxRepairAttempts && !acceptLengthOnlyResult
+            && hasOnlyNonBlockingGenerationIssues(validation.issues, mode)) {
+            // 마지막 시도에서 지워 짧아졌으면, 앞에서 얻은 길이 미달뿐인 더 긴 결과와 비교해 긴 쪽을 쓴다.
+            const best = lengthOnlyBest && getUtf8ByteLength(lengthOnlyBest.text) > getUtf8ByteLength(text) ? lengthOnlyBest : candidate;
+            return {
+                text: best.text,
+                attempts: attempt + 1,
+                repaired: attempt > 0,
+                validation: best.validation,
+                acceptedWithLengthWarning: true,
+            };
+        }
+
         if (acceptLengthOnlyResult && hasOnlyNonBlockingGenerationIssues(validation.issues, mode)) {
             return {
                 text,
@@ -1095,12 +1217,15 @@ export async function generateWithSilentValidation({
             };
         }
 
-        lastText = text;
-        lastValidation = validation;
+        const nextCandidate = shouldAppendLengthRepair ? bestCandidate ?? candidate : candidate;
+        lastText = nextCandidate.text;
+        lastValidation = nextCandidate.validation;
+        if (attempt === maxRepairAttempts) break;
         nextPrompt = buildRepairPrompt({
-            text,
-            issues: validation.issues,
+            text: lastText,
+            issues: lastValidation.issues,
             sourcePrompt: prompt,
+            lengthRepairFacts,
             maxTargetBytes,
             minTargetBytes,
             minTargetChars: effectiveMinTargetChars,
@@ -1114,6 +1239,7 @@ export async function generateWithSilentValidation({
             preserveTextOnLengthRepair,
             requiredAdviceDomains,
             strictFacts,
+            privateTerms,
         });
     }
 
@@ -1127,19 +1253,7 @@ export async function generateWithSilentValidation({
         mode,
         { bannedTerms, forbiddenTerms, requiredTerms },
     );
-    const validation = validateGeneratedText(sanitized, {
-        forbiddenTerms,
-        maxTargetBytes,
-        minTargetBytes,
-        minTargetChars: effectiveMinTargetChars,
-        mode,
-        targetChars,
-        requiredTerms,
-        bannedTerms,
-        requiredAdviceDomains,
-        requiredContentGroups,
-        activityToneRules,
-    });
+    const validation = validateGeneratedText(sanitized, validationOptions);
 
     if (validation.ok) {
         return {

@@ -13,7 +13,7 @@ import { fetchRepetitionCheck } from "../../utils/repetitionCheck";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import StrictFactsToggle from "../../components/StrictFactsToggle";
-import { generateWithSilentValidation } from "../../utils/generationHarness";
+import { generateWithSilentValidation, redactForbiddenTerms } from "../../utils/generationHarness";
 import { generateWithLocalSolarFallback, getSolarFallbackNotice } from "../../utils/localSolarFallback";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { fetchSearchContext } from "../../utils/searchContextFetch";
@@ -432,6 +432,9 @@ ${lengthInstruction}
     };
 
     const generateForStudent = async (student) => {
+        const forbiddenTerms = [clubName, student.name];
+        const privateTerms = [student.name];
+        const generationInstructions = redactForbiddenTerms(additionalInstructions, privateTerms);
         const validActivityEntries = activities
             .map((activity, originalIndex) => ({
                 text: activity.trim(),
@@ -490,8 +493,8 @@ ${lengthInstruction}
                     updateStudent(student.id, "progress", "웹 검색 보강 중...");
                     const searchResult = await fetchSearchContext({
                         subjectName: clubName,
-                        commonActivities: selectedActivityEntries.map(entry => entry.text),
-                        individualActivity: student.individualActivity,
+                        commonActivities: selectedActivityEntries.map((entry) => redactForbiddenTerms(entry.text, privateTerms)),
+                        individualActivity: redactForbiddenTerms(student.individualActivity, privateTerms),
                     });
                     searchContext = searchResult.context || "";
                     if (searchResult.query) {
@@ -516,7 +519,10 @@ ${lengthInstruction}
                 minTargetBytes,
                 targetChars,
                 mode: "record",
-                forbiddenTerms: [clubName, student.name],
+                forbiddenTerms,
+                privateTerms,
+                lengthRepairFacts: [...selectedActivityEntries.map(({ text }) => text), student.individualActivity]
+                    .filter(Boolean).join("\n"),
                 requiredContentGroups: solarRequiredContentGroups,
                 strictFacts: useStrictFacts,
                 checkRepetition: fetchRepetitionCheck,
@@ -526,7 +532,7 @@ ${lengthInstruction}
                 previousValidation,
                 provider: "local",
                 setProgress: (message) => updateStudent(student.id, "progress", message),
-                run: () => fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars, strictFacts: useStrictFacts }),
+                run: () => fetchStream({ prompt: nextPrompt, additionalInstructions: generationInstructions, model: selectedModel, targetChars, strictFacts: useStrictFacts }),
             });
             const generationResult = isLocalFallbackEligible
                 ? await generateWithLocalSolarFallback({
@@ -538,7 +544,7 @@ ${lengthInstruction}
                         previousValidation,
                         provider: "upstage",
                         setProgress: (message) => updateStudent(student.id, "progress", message),
-                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars, model: selectedModel, strictFacts: useStrictFacts }),
+                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions: generationInstructions, targetChars, model: selectedModel, strictFacts: useStrictFacts }),
                     }),
                 })
                 : await generateWithSilentValidation({
@@ -555,21 +561,22 @@ ${lengthInstruction}
                     provider: getGenerationProvider({ isNvidiaSelected, isUpstageSelected, hasOpenAIKey: Boolean(appliedOpenAIKey) }),
                     setProgress: (message) => updateStudent(student.id, "progress", message),
                     run: () => isNvidiaSelected
-                        ? fetchNvidiaCompletion({ prompt: nextPrompt, additionalInstructions, targetChars, model: selectedModel })
+                        ? fetchNvidiaCompletion({ prompt: nextPrompt, additionalInstructions: generationInstructions, targetChars, model: selectedModel })
                         : isUpstageSelected
                             ? fetchUpstageCompletion({
                                 prompt: nextPrompt,
-                                additionalInstructions,
+                                additionalInstructions: generationInstructions,
                                 targetChars,
                                 model: selectedModel,
                                 sourceFacts: strictFactMode
-                                    ? [...selectedActivityEntries.map((entry) => entry.text), student.individualActivity].filter(Boolean)
+                                    ? [...selectedActivityEntries.map((entry) => entry.text), student.individualActivity]
+                                        .map((fact) => redactForbiddenTerms(fact, privateTerms)).filter(Boolean)
                                     : undefined,
                                 strictFacts: useStrictFacts,
                             })
                         : appliedOpenAIKey
-                            ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions, apiKey: appliedOpenAIKey, targetChars, model: selectedOpenAIModel })
-                            : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars, strictFacts: useStrictFacts }),
+                            ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions: generationInstructions, apiKey: appliedOpenAIKey, targetChars, model: selectedOpenAIModel })
+                            : fetchStream({ prompt: nextPrompt, additionalInstructions: generationInstructions, model: selectedModel, targetChars, strictFacts: useStrictFacts }),
                     }),
                 });
 

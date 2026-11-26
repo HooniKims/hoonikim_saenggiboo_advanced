@@ -69,6 +69,28 @@ test("local Solar fallback calls Solar after local output remains invalid", asyn
     assert.equal(result.validation.ok, true);
 });
 
+test("local and fallback Solar requests exclude forbidden terms even during length repair", async () => {
+    const name = "가명학생";
+    const prompts = { local: [], solar: [] };
+    const result = await generateWithLocalSolarFallback({
+        prompt: `${name}의 자료 조사`,
+        validationOptions: { ...validationOptions, forbiddenTerms: [name], privateTerms: [name] },
+        localGenerateOnce: async (prompt) => {
+            prompts.local.push(prompt);
+            return `${name} 자료 조사함.`;
+        },
+        solarGenerateOnce: async (prompt) => {
+            prompts.solar.push(prompt);
+            return prompts.solar.length === 1 ? `${name} 자료 조사함.` : makeText("조사 결과를 정리하며", 3);
+        },
+    });
+    assert.equal(result.provider, "upstage");
+    assert.equal(prompts.local.length, 3);
+    assert.equal(prompts.solar.length, 2);
+    assert.ok([...prompts.local, ...prompts.solar].every((prompt) => !prompt.includes(name)));
+    assert.ok(!result.text.includes(name));
+});
+
 test("local Solar fallback returns the best local output when Solar throws", async () => {
     const localOutputs = [
         makeText("자료 조사 활동을 충실히 수행하여", 3),

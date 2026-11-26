@@ -5,6 +5,7 @@ import {
     buildRepairPrompt,
     finalizeGeneratedText,
     generateWithSilentValidation,
+    redactForbiddenTerms,
     validateGeneratedText,
 } from "../utils/generationHarness.js";
 import { getUtf8ByteLength } from "../utils/textProcessor.js";
@@ -706,6 +707,7 @@ test("generateWithSilentValidation silently retries with a repair prompt", async
         minTargetChars: 0,
         targetChars: 100,
         forbiddenTerms: ["국어"],
+        requiredContentGroups: [{ label: "발표 근거", terms: ["근거 자료"] }],
         mode: "record",
         generateOnce: async (prompt) => {
             prompts.push(prompt);
@@ -720,6 +722,24 @@ test("generateWithSilentValidation silently retries with a repair prompt", async
     assert.equal(result.attempts, 2);
     assert.equal(result.repaired, true);
     assert.match(prompts[1], /규칙 위반/);
+});
+
+test("repair prompts omit forbidden terms from issues, source conditions and the draft", () => {
+    const forbiddenTerms = ["가명학생", "가상과목", "가상동아리"];
+    const draft = `${forbiddenTerms.join(" ")}의 발표를 정리함.`;
+    const { issues } = validateGeneratedText(draft, { forbiddenTerms });
+    const repaired = buildRepairPrompt({
+        text: draft,
+        sourcePrompt: `${draft} 원본의 발표 근거에 따라 작성함.`,
+        issues,
+        forbiddenTerms,
+        privateTerms: ["가명학생"],
+        targetChars: 150,
+    });
+    // AI 요청에서는 학생 이름만 지운다(과목명·동아리명은 개인정보가 아니고 일반 단어를 망가뜨릴 수 있어 남김)
+    assert.ok(!repaired.includes("가명학생"));
+    assert.match(repaired, /학생 이름, 과목명, 동아리명 같은 고유명사/);
+    assert.match(repaired, /원본의 발표 근거/);
 });
 
 test("generateWithSilentValidation accepts output below the target band without repair", async () => {
@@ -913,6 +933,46 @@ test("buildRepairPrompt asks for only new observations during short-output repai
     assert.match(prompt, /기존 본문은 시스템이 유지/);
     assert.match(prompt, /기존 본문을 다시 출력하거나 요약하지 말고/);
     assert.match(prompt, /추가할 새 문장만 반환/);
+});
+
+test("length repair with activity facts requests candidates without repeating the full-draft instructions", () => {
+    const prompt = buildRepairPrompt({
+        text: "조사한 자료를 표로 정리함.",
+        issues: [{ code: "under_min_bytes", message: "목표 byte 미달" }],
+        sourcePrompt: "전체 본문을 다시 쓰고 모든 활동을 처음부터 포함함.",
+        lengthRepairFacts: "가명학생이 상권 자료를 조사함.",
+        forbiddenTerms: ["가명학생"],
+        privateTerms: ["가명학생"],
+        targetChars: 589,
+        maxTargetBytes: 1500,
+        minTargetBytes: 1275,
+        preserveTextOnLengthRepair: true,
+    });
+    assert.match(prompt, /상권 자료를 조사함/);
+    assert.match(prompt, /새 관찰 문장 후보만 반환/);
+    assert.doesNotMatch(prompt, /가명학생|전체 본문을 다시 쓰고/);
+});
+
+test("record repair with a grade mismatch focuses on the affected activities", () => {
+    const prompt = buildRepairPrompt({
+        text: "상권 자료를 수집함.",
+        issues: [{ code: "grade_tone_mismatch", detail: "활동1(E): E 수준 표현 누락" }],
+        sourcePrompt: "전체 원본 지침",
+        lengthRepairFacts: "상권 자료 수집 (성취도 E)",
+        activityToneRules: [{
+            label: "활동1",
+            grade: "E",
+            anchors: ["상권 자료"],
+            evidence: ["지속적인 개별 지도"],
+        }],
+        targetChars: 589,
+        maxTargetBytes: 1500,
+        minTargetBytes: 1275,
+        preserveTextOnLengthRepair: true,
+    });
+    assert.match(prompt, /활동1\(E\).*상권 자료.*지속적인 개별 지도/);
+    assert.match(prompt, /E 수준 표현 누락/);
+    assert.doesNotMatch(prompt, /전체 원본 지침/);
 });
 
 test("buildRepairPrompt sizes an appended Solar sentence from the byte shortfall", () => {
@@ -1225,4 +1285,58 @@ test("record finalization keeps '~다 주며' connectives instead of inserting a
     assert.match(helping, /데려다 주며/);
     assert.match(helping, /가져다 놓으며/);
     assert.doesNotMatch(helping, /데려다\.|가져다\./);
+});
+
+test("redactForbiddenTerms removes only full student names and keeps ordinary words", () => {
+    // 두 글자 이름은 일반 단어(하나, 보람)와 겹치므로 지우지 않는다.
+    assert.equal(redactForbiddenTerms("하나의 주제를 정해 보람을 느낌.", ["하나", "보람"]), "하나의 주제를 정해 보람을 느낌.");
+    assert.equal(redactForbiddenTerms("김민수가 개인정보 보호 캠페인을 함.", ["김민수"]), "가 개인정보 보호 캠페인을 함.");
+});
+
+test("repetition cleanup keeps sentences whose removal drops a required activity", async () => {
+    const draft = "상권 조사 활동에서 주도적으로 탐구하는 태도가 돋보임. 인구 조사 활동에서 주도적으로 탐구하는 태도가 돋보임.";
+    const result = await generateWithSilentValidation({
+        prompt: "원본",
+        mode: "record",
+        targetChars: 300,
+        minTargetChars: 0,
+        requiredContentGroups: [{ label: "활동1", terms: ["상권 조사"] }, { label: "활동2", terms: ["인구 조사"] }],
+        generateOnce: async () => draft,
+    });
+    assert.match(result.text, /인구 조사/);
+});
+
+test("last-attempt repetition cleanup does not return text shorter than an earlier length-only result", async () => {
+    const long = "자료를 표로 정리함. 업종별 매출을 비교함. 그래프 색을 바꿔 다시 그림. 발표 질문에 근거를 들어 답함.";
+    let calls = 0;
+    const result = await generateWithSilentValidation({
+        prompt: "원본",
+        mode: "record",
+        targetChars: 589,
+        maxTargetBytes: 1500,
+        minTargetBytes: 1275,
+        maxRepairAttempts: 1,
+        acceptLengthOnlyResult: false,
+        checkRepetition: async () => (calls++ === 0 ? { pairs: [] } : { pairs: [[1, 2], [1, 3], [1, 4]] }),
+        generateOnce: async () => long,
+    });
+    assert.ok(Buffer.byteLength(result.text) >= Buffer.byteLength(long) - 1);
+});
+
+test("length-repair candidates drop list markers and labels", async () => {
+    let attempt = 0;
+    const result = await generateWithSilentValidation({
+        prompt: "원본",
+        mode: "record",
+        targetChars: 589,
+        maxTargetBytes: 1500,
+        minTargetBytes: 300,
+        maxRepairAttempts: 1,
+        acceptLengthOnlyResult: false,
+        preserveTextOnLengthRepair: true,
+        generateOnce: async () => (attempt++ === 0
+            ? "자료를 표로 정리함."
+            : "- 업종별 매출을 피벗 테이블로 비교함.\n후보 2: **그래프 색을 바꿔 다시 그려 차이를 드러냄.**"),
+    });
+    assert.doesNotMatch(result.text, /(^|\s)-\s|후보|\*\*/);
 });
