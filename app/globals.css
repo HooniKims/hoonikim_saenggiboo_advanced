@@ -929,6 +929,19 @@ button {
   white-space: nowrap;
 }
 
+/* 로컬 모델 대신 Solar Pro 4가 작성했을 때의 안내 */
+.fallback-notice {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  color: #9a3412;
+  background-color: #fff7ed;
+  border: 1px solid #fdba74;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+
 /* Copy Button Style */
 .btn-copy {
   display: inline-flex;

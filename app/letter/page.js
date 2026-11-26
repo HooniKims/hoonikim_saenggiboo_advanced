@@ -12,7 +12,7 @@ import { fetchUpstageCompletion } from "../../utils/upstageFetch";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
 import { generateWithSilentValidation } from "../../utils/generationHarness";
-import { generateWithLocalSolarFallback } from "../../utils/localSolarFallback";
+import { generateWithLocalSolarFallback, getSolarFallbackNotice } from "../../utils/localSolarFallback";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { buildLetterRuleTermInstruction, buildLetterVariationInstruction, buildShuffledKeywordContext, getLetterBannedTerms, getLetterRequiredTerms } from "../../utils/letterKeywords";
 import { fetchSearchContext } from "../../utils/searchContextFetch";
@@ -188,7 +188,7 @@ export default function LetterPage() {
 
         // 글자수 지침은 공통 유틸에서 생성
         const targetBytes = normalizeTargetBytes(textLength, manualLength);
-        const lengthInstruction = getCharacterGuideline(targetChars, targetBytes, getMinimumTargetBytes(targetBytes));
+        const lengthInstruction = getCharacterGuideline(targetChars, targetBytes, getMinimumTargetBytes(targetBytes), { mode: "letter" });
 
         const keywordContext = buildShuffledKeywordContext(keywords);
         const ruleTermInstruction = buildLetterRuleTermInstruction({ season, keywords });
@@ -220,13 +220,15 @@ ${keywordContext}${searchContextText}
 9. 아래 학기 구분 필수 용어는 표현을 바꾸지 말고 본문 안에 정확히 포함할 것
 10. 아래 금지 용어는 본문에 절대 포함하지 않을 것
 11. 키워드는 목록처럼 나열하지 말고 문장 속에서 자연스럽게 풀어 쓸 것
-12. 학교생활을 성실하게 잘 수행했다는 일반적인 뉘앙스로 시작하되 매번 표현을 다르게 할 것
+12. 첫 문장에서만 학교생활에 성실히 참여했다는 일반적 평가를 쓰고, 두 번째 문장부터는 방학에 실천할 조언을 쓸 것
 13. 학업 계획, 건강한 생활 리듬, 친구와의 배려 있는 관계, 가족과의 대화나 지지 중 최소 세 가지 이상을 반드시 반영하되 하나의 흐름으로 연결하고 각각 따로 설명하지 말 것
 14. 입력되지 않은 구체적인 활동, 실험, 탐구 주제, 수행 장면은 지어내지 말 것
 15. 문장 사이에는 "그 과정에서", "이어", "나아가", "이러한 흐름이" 같은 연결 흐름을 자연스럽게 사용할 것
 16. 추가 정보를 요청하지 말고 입력된 키워드만으로 완성할 것
 17. 방학 동안 가정에서 지도할 내용은 권유형 경어체("~바랍니다.", "~주시기 바랍니다.")로 마무리할 것
 18. "~해보세요.", "~보세요.", "~하세요.", "~하십시오." 같은 직접 지시형/대화체 표현은 사용하지 말고 "~바랍니다.", "~주시기 바랍니다.", "~부탁드립니다."로 정중하게 쓸 것
+19. 각 조언에 서로 다른 실천 방법이나 가정에서 살필 점을 담고, 이미 서술한 조언을 되풀이하지 말 것
+${targetBytes >= 1000 ? `20. 본문은 ${targetBytes >= 1500 ? "9~10문장" : "5~6문장"}으로 작성할 것. 학습 계획·생활 리듬·친구 관계·가족 대화에 입력 키워드와 연결된 실천 방법을 넣고, 특히 강조한 키워드는 언제 어떻게 실천할지 구체적으로 안내할 것` : ""}
 
 ${ruleTermInstruction}
 
@@ -239,8 +241,8 @@ ${lengthInstruction}
 - 글자수 표기, 분석, 검증 포인트, 부가 설명 등 메타 정보는 출력하지 않음
 - "학업, 건강, 친구관계, 가족관계"처럼 키워드를 쉼표로 나열하지 않음
 
-<좋은 예시>
-"한 학기 동안 학교생활에 성실하게 참여하며 맡은 일을 차분히 해내는 모습이 돋보였습니다. 여름방학 동안에는 배움의 흐름을 이어 갈 수 있도록 무리하지 않는 학습 계획을 세우고, 건강한 생활 리듬을 지키며 가족과의 대화 속에서 마음을 안정적으로 돌보는 시간을 마련해 주시기 바랍니다. 친구들과도 서로를 배려하는 관계를 이어 갈 수 있도록 가정에서 함께 살펴봐 주시기 바랍니다."
+${isUpstageSelected ? "" : `<좋은 예시>
+"한 학기 동안 학교생활에 성실하게 참여하며 맡은 일을 차분히 해내는 모습이 돋보였습니다. 여름방학 동안에는 배움의 흐름을 이어 갈 수 있도록 무리하지 않는 학습 계획을 세우고, 건강한 생활 리듬을 지키며 가족과의 대화 속에서 마음을 안정적으로 돌보는 시간을 마련해 주시기 바랍니다. 친구들과도 서로를 배려하는 관계를 이어 갈 수 있도록 가정에서 함께 살펴봐 주시기 바랍니다."`}
     `;
     };
 
@@ -251,6 +253,7 @@ ${lengthInstruction}
 
         try {
             updateStudent(student.id, "status", "loading");
+            updateStudent(student.id, "fallbackNotice", "");
             updateStudent(student.id, "progress", "생성 준비 중...");
             let searchContext = "";
             if (useWebSearchContext && keywords.trim()) {
@@ -332,6 +335,7 @@ ${lengthInstruction}
             }
 
             const result = generationResult.text;
+            updateStudent(student.id, "fallbackNotice", getSolarFallbackNotice(generationResult));
             updateStudent(student.id, "result", result);
             updateStudent(student.id, "status", "success");
             updateStudent(student.id, "progress", "");
@@ -746,6 +750,12 @@ ${lengthInstruction}
                                                 )}
                                             </button>
                                         </div>
+                                    )}
+
+                                    {student.result && student.fallbackNotice && (
+                                        <p className="fallback-notice" role="status">
+                                            {student.fallbackNotice}
+                                        </p>
                                     )}
                                 </div>
                             </div>

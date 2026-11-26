@@ -1,5 +1,6 @@
 import { getLetterSystemMessage, getStandardSystemMessage } from "../../../utils/streamFetch.js";
 import { finalizeGeneratedText } from "../../../utils/generationHarness.js";
+import { getExpansionFrameworkGuideline } from "../../../utils/textProcessor.js";
 
 const DEFAULT_UPSTAGE_API_URL = "https://api.upstage.ai/v1/chat/completions";
 const DEFAULT_UPSTAGE_MODEL = "solar-pro4";
@@ -7,13 +8,12 @@ const DEFAULT_UPSTAGE_REASONING_EFFORT = "low";
 const DEFAULT_UPSTAGE_MAX_TOKENS = 16384;
 const DEFAULT_UPSTAGE_TIMEOUT_MS = 8000;
 const DEFAULT_UPSTAGE_TEMPERATURE = 0.1;
-const SELECTABLE_UPSTAGE_MODEL_IDS = new Set(["solar-pro4", "solar-open2"]);
+const SELECTABLE_UPSTAGE_MODEL_IDS = new Set(["solar-pro4", "solar-mini-4-5-preview"]);
+const FACT_CHECKED_MODEL_IDS = new Set(["solar-pro4", "solar-mini-4-5-preview"]);
 const MODEL_MAX_TOKENS = {
     "solar-mini": 16384,
     "solar-mini-250422": 16384,
-    "solar-open": 131072,
-    "solar-open-2": 131072,
-    "solar-open2": 131072,
+    "solar-mini-4-5-preview": 16384,
     "solar-pro2": 16384,
     "solar-pro2-251215": 16384,
     "solar-pro3": 65536,
@@ -24,7 +24,7 @@ const MODEL_MAX_TOKENS = {
     "syn-pro-251021": 16384,
 };
 const REASONING_MODEL_IDS = new Set([
-    "solar-open2",
+    "solar-mini-4-5-preview",
     "solar-pro2",
     "solar-pro2-251215",
     "solar-pro3",
@@ -34,6 +34,7 @@ const REASONING_MODEL_IDS = new Set([
     "syn-pro",
     "syn-pro-251021",
 ]);
+// 기본(분량 채우기): 입력 키워드와 성취 수준 범위에서 관찰 문장을 창작·보완해 분량을 채운다.
 const OUTPUT_ONLY_INSTRUCTION = `【출력 원칙】
 - 지침 충돌을 설명하지 말고 최우선 지침을 적용한 최종 본문만 출력합니다.
 - '주의', '시스템 오류', '재작성 요청', '사용자 추가 지침' 같은 메타 설명을 출력하지 않습니다.
@@ -42,6 +43,13 @@ const OUTPUT_ONLY_INSTRUCTION = `【출력 원칙】
 - 활동이 여러 개이면 각 활동의 핵심 수행과 지정된 성취 수준을 한 문장 안에 통합하고, 입력 순서대로 모든 활동을 최소 한 문장씩 먼저 완성합니다.
 - 앞 활동만 길게 확장하지 말고 전체 활동에 분량을 균등하게 배분하며, 모든 활동을 반영한 뒤 남은 분량에서만 관찰 관점을 추가합니다.
 - 같은 활동을 서로 다른 관찰 관점으로 풀어 쓰는 것은 허용하되, 입력에 없는 사실인 작품명, 수상, 기관, 수치, 도구, 실험 결과, 점수 같은 검증 불가능한 구체 사실은 만들지 않습니다.`;
+// 입력한 활동만으로 작성(체크 시): 입력 사실만 쓰고 분량보다 사실을 우선한다.
+const STRICT_FACTS_OUTPUT_ONLY_INSTRUCTION = `【출력 원칙】
+- 지침 충돌을 설명하지 말고 최우선 지침을 적용한 최종 본문만 출력합니다.
+- '주의', '시스템 오류', '재작성 요청', '사용자 추가 지침' 같은 메타 설명을 출력하지 않습니다.
+- 개인별 활동 내용이 있으면 그 수행, 역할, 관찰 단서를 우선 활용해 구체화합니다.
+- 활동이 여러 개이면 각 활동의 핵심 수행과 지정된 성취 수준을 한 문장 안에 통합하고, 입력 순서대로 모든 활동을 최소 한 문장씩 먼저 완성합니다.
+- 검색 자료는 배경 설명에만 활용합니다. 검색 자료, 예시, 성취 수준 설명, 이전 초안에 등장한 내용을 학생이 직접 한 활동의 근거로 삼지 않습니다.`;
 
 function getConfiguredMaxTokens(model) {
     if (model === "solar-pro4" || model === "solar-pro4-260806") return MODEL_MAX_TOKENS[model];
@@ -63,7 +71,6 @@ function getConfiguredTimeoutMs() {
 }
 
 function getConfiguredTemperature(model) {
-    if (model === "solar-open2") return 1;
     const parsed = Number(process.env.UPSTAGE_TEMPERATURE);
     if (!Number.isFinite(parsed)) return DEFAULT_UPSTAGE_TEMPERATURE;
     return Math.min(Math.max(parsed, 0), 2);
@@ -71,7 +78,8 @@ function getConfiguredTemperature(model) {
 
 function getUpstageConfig(requestedModel = "") {
     const model = requestedModel || process.env.UPSTAGE_MODEL?.trim() || DEFAULT_UPSTAGE_MODEL;
-    const reasoningEffort = model === "solar-open2" || model === "solar-pro4" || model === "solar-pro4-260806"
+    // Solar Mini 4.5는 reasoning을 켜면 응답이 20배 가까이 느려져 항상 끈다.
+    const reasoningEffort = model === "solar-mini-4-5-preview" || model === "solar-pro4" || model === "solar-pro4-260806"
         ? "none"
         : process.env.UPSTAGE_REASONING_EFFORT?.trim() || DEFAULT_UPSTAGE_REASONING_EFFORT;
     return {
@@ -107,21 +115,26 @@ async function fetchWithTimeoutRetry(url, options, timeoutMs) {
     throw new Error("Upstage API 재시도에 실패했습니다.");
 }
 
-function buildSystemMessage(additionalInstructions, outputType = "record") {
+function buildSystemMessage(additionalInstructions, outputType = "record", strictFacts = false) {
     let systemMessage = outputType === "letter"
         ? getLetterSystemMessage()
-        : getStandardSystemMessage();
+        : getStandardSystemMessage(strictFacts);
 
-    systemMessage += `\n\n${OUTPUT_ONLY_INSTRUCTION}`;
+    systemMessage += `\n\n${strictFacts ? STRICT_FACTS_OUTPUT_ONLY_INSTRUCTION : OUTPUT_ONLY_INSTRUCTION}`;
 
     if (additionalInstructions?.trim()) {
-        systemMessage += `\n\n【최우선 지침】\n아래 사용자 추가 지침은 기본 작성 규칙보다 우선합니다. 충돌 시 사용자 추가 지침을 우선 적용하세요.\n${additionalInstructions.trim()}`;
+        systemMessage += strictFacts
+            ? `\n\n【최우선 지침】\n학생 활동의 사실을 유지하는 범위에서 아래 사용자 추가 지침을 기본 문체와 표현 규칙보다 우선 적용하세요.\n${additionalInstructions.trim()}`
+            : `\n\n【최우선 지침】\n아래 사용자 추가 지침은 기본 작성 규칙보다 우선합니다. 충돌 시 사용자 추가 지침을 우선 적용하세요.\n${additionalInstructions.trim()}`;
     }
 
-    return systemMessage;
+    return strictFacts ? `${systemMessage}\n\n${getExpansionFrameworkGuideline(true)}` : systemMessage;
 }
 
-function normalizeSolarPrompt(prompt, targetChars) {
+function normalizeSolarPrompt(prompt, targetChars, strictFacts = false) {
+    const source = String(prompt || "");
+    if (strictFacts && source.startsWith("아래 글은 내부 규칙 검증에서 실패했습니다.")) return source;
+
     const numericTarget = Number(targetChars);
     const maxChars = Number.isFinite(numericTarget)
         ? Math.min(Math.max(Math.floor(numericTarget), 1), 650)
@@ -133,7 +146,14 @@ function normalizeSolarPrompt(prompt, targetChars) {
         : maxChars >= 300
             ? "- 수행 과정, 사고 수준, 성취 수준의 세 관점을 각각 구분해 서술함."
             : "- 핵심 수행 과정과 성취 수준을 우선하여 간결하게 서술함.";
-    const conciseLengthInstruction = `<분량 지침>
+    const conciseLengthInstruction = strictFacts
+        ? `<분량 지침>
+- 본문은 ${minChars}~${preferredMaxChars}자 정도를 목표로 충분히 구체적으로 작성함.
+- 글자수나 byte 수치를 직접 계산하거나 출력하지 않음.
+- 여러 활동이 입력되면 모든 활동의 핵심 수행과 성취 수준을 한 문장씩 먼저 작성함.
+- 분량이 남으면 입력에 명시된 개인별 수행과 관찰 내용을 구체화함. 자료가 적으면 분량 목표보다 사실에 맞는 서술을 우선함.
+- 모든 문장은 완전한 종결어미와 마침표로 끝냄.`
+        : `<분량 지침>
 - 본문은 ${minChars}~${preferredMaxChars}자 정도를 목표로 충분히 구체적으로 작성함.
 - 글자수나 byte 수치를 직접 계산하거나 출력하지 않음.
 - 분량이 부족하면 핵심 키워드의 의미 범위 안에서 성취 수준을 기준으로 수행 과정, 사고 수준, 참여 태도, 피드백 반영을 자연스럽게 창작·보완함.
@@ -143,14 +163,14 @@ ${expansionCoverage}
 - 입력에 없는 작품명, 수상, 기관, 수치, 도구, 실험 결과, 점수 같은 검증 불가능한 구체 사실은 만들지 않음.
 - 모든 문장은 완전한 종결어미와 마침표로 끝냄.`;
 
-    return String(prompt || "").replace(
+    return source.replace(
         /<분량 제한>[\s\S]*?(?=\n\s*(?:<출력 형식>|\[출력 형식\]|<좋은 예시>|\[좋은 예시\])|\s*$)/,
         conciseLengthInstruction,
     );
 }
 
-function buildUserMessage(prompt, additionalInstructions, targetChars) {
-    const normalizedPrompt = normalizeSolarPrompt(prompt, targetChars);
+function buildUserMessage(prompt, additionalInstructions, targetChars, strictFacts = false) {
+    const normalizedPrompt = normalizeSolarPrompt(prompt, targetChars, strictFacts);
     if (!additionalInstructions?.trim()) return normalizedPrompt;
     const instruction = additionalInstructions.trim();
     return `[최우선 규칙] 다음 사용자 추가 지침을 반드시 지켜서 작성하라: ${instruction}
@@ -178,23 +198,33 @@ function extractContent(data) {
     return (content || "").trim();
 }
 
-async function callUpstage({ prompt, additionalInstructions, targetChars, model, outputType, forceMaximumTokens = false }) {
+async function callUpstage({ prompt, additionalInstructions, targetChars, model, outputType, review, strictFacts = false }) {
     const config = getUpstageConfig(model);
+    const messages = review ? [
+        {
+            role: "system",
+            content: `학교생활기록부 초안의 사실관계를 교정하세요.
+- 초안의 행동, 방법, 결과, 기간을 관찰 기록과 절 단위로 대조하세요. 근거가 없는 부분만 삭제하거나 기록과 일치하게 고치세요. 비교했다는 기록만으로 어느 쪽이 더 빨랐는지, 얼마나 달랐는지, 어떤 원인을 찾아냈는지 단정하지 마세요. 한 번의 관찰을 반복된 행동이나 한 해 동안의 변화로 쓰지 마세요.
+- 관찰 기록이 짧은 키워드로만 되어 있으면 키워드가 직접 가리키는 행동과 느낀 점을 문장으로 풀어 쓴 부분은 근거가 있는 것으로 보고 유지하세요. 키워드에 없는 다른 활동, 도구, 결과, 협력 장면은 근거가 없는 것으로 보세요.
+- '수행이 돋보임', '이해가 뛰어남', '연습이 더해지면 향상이 기대됨'처럼 새로운 행동이나 결과를 주장하지 않는 성취도 평가는 유지하세요. 근거 없는 행동에 평가가 붙어 있으면 평가를 버리지 말고 기록에 있는 해당 활동에 연결하세요.
+- mustKeep에 있는 평가 표현은 지우거나 바꾸지 말고 초안에서 붙어 있던 활동 문장 안에 그대로 남기세요.
+- 초안에서 근거가 있는 표현과 활동의 순서를 유지하세요. 여러 활동을 한 문장에 나열하는 식으로 합치지 말고 활동별 문장을 유지하세요. 관찰 사실을 전부 나열하는 문장으로 바꾸지 마세요. 추가 지침은 사실을 바꾸지 않는 범위에서 지키세요.
+- 현재형 명사 종결어미와 마침표를 사용하고 한 문단의 교정 본문만 출력하세요. 입력 사실을 늘리거나 권장 분량에 맞추려 하지 마세요.`,
+        },
+        { role: "user", content: JSON.stringify(review) },
+    ] : [
+        { role: "system", content: buildSystemMessage(additionalInstructions, outputType, strictFacts) },
+        { role: "user", content: buildUserMessage(prompt, additionalInstructions, targetChars, strictFacts) },
+    ];
     const requestBody = {
         model: config.model,
-        messages: [
-            { role: "system", content: buildSystemMessage(additionalInstructions, outputType) },
-            { role: "user", content: buildUserMessage(prompt, additionalInstructions, targetChars) },
-        ],
+        messages,
         max_tokens: config.maxTokens,
         temperature: config.temperature,
         stream: false,
     };
     if (config.reasoningEffort) {
         requestBody.reasoning_effort = config.reasoningEffort;
-    }
-    if (config.model === "solar-open2") {
-        requestBody.top_p = 1;
     }
 
     const response = await fetchWithTimeoutRetry(config.apiUrl, {
@@ -221,6 +251,8 @@ export async function POST(req) {
     try {
         const body = await req.json();
         const { prompt, additionalInstructions, targetChars, outputType = "record" } = body;
+        // '입력한 활동만으로 작성'을 체크했을 때만 사실 우선 지침과 사실 대조를 적용한다.
+        const strictFacts = body.strictFacts === true;
         const requestedModel = String(body.model || "").trim();
         if (requestedModel && !SELECTABLE_UPSTAGE_MODEL_IDS.has(requestedModel)) {
             return Response.json({ error: `지원하지 않는 Upstage 모델입니다: ${requestedModel}` }, { status: 400 });
@@ -240,6 +272,7 @@ export async function POST(req) {
             targetChars,
             model: requestedModel,
             outputType,
+            strictFacts,
         });
 
         if (response.ok && !extractContent(data)) {
@@ -249,7 +282,7 @@ export async function POST(req) {
                 targetChars: Math.ceil((Number(targetChars) || 490) * 1.2),
                 model: requestedModel,
                 outputType,
-                forceMaximumTokens: true,
+                strictFacts,
             });
             response = retry.response;
             data = retry.data;
@@ -261,7 +294,7 @@ export async function POST(req) {
             return Response.json({ error: `Upstage API 오류 (${response.status}): ${message}` }, { status: response.status });
         }
 
-        const content = finalizeGeneratedText(extractContent(data), targetChars, 0, outputType);
+        let content = extractContent(data);
         if (!content) {
             const finishReason = data?.choices?.[0]?.finish_reason;
             return Response.json({
@@ -269,7 +302,36 @@ export async function POST(req) {
             }, { status: 502 });
         }
 
-        return Response.json({ result: content, model });
+        const sourceFacts = Array.isArray(body.sourceFacts)
+            ? body.sourceFacts.filter((fact) => typeof fact === "string" && fact.trim())
+            : [];
+        if (strictFacts && FACT_CHECKED_MODEL_IDS.has(model) && outputType === "record" && sourceFacts.length) {
+            // 성취도 평가 표현(예: 돋보임, 향상이 기대됨)은 사실 대조에서 지워지면 안 된다.
+            const keepTerms = Array.isArray(body.keepTerms)
+                ? body.keepTerms.filter((term) => typeof term === "string" && term.trim())
+                : [];
+            const draft = content;
+            const mustKeep = keepTerms.filter((term) => draft.includes(term));
+            const checked = await callUpstage({
+                model,
+                review: { sourceFacts, additionalInstructions, mustKeep, draft },
+            });
+            const reviewed = checked.response.ok ? extractContent(checked.data) : "";
+            if (!reviewed) {
+                return Response.json({ error: "Solar가 초안의 사실관계를 확인하지 못했습니다. 다시 생성해 주세요." }, { status: 502 });
+            }
+            const lostTerms = mustKeep.filter((term) => !reviewed.includes(term));
+            if (lostTerms.length) {
+                console.warn(`[사실 대조] 평가 표현이 지워져 대조 전 초안을 사용함: ${lostTerms.join(", ")}`);
+            }
+            content = lostTerms.length ? draft : reviewed;
+        }
+
+        const result = finalizeGeneratedText(content, targetChars, 0, outputType);
+        if (!result) {
+            return Response.json({ error: "Upstage API 응답에서 생성 본문을 찾지 못했습니다." }, { status: 502 });
+        }
+        return Response.json({ result, model });
     } catch (error) {
         return Response.json({ error: `서버 오류: ${error.message}` }, { status: 500 });
     }

@@ -37,7 +37,7 @@ test("Upstage route asks for UPSTAGE_API_KEY when the env key is empty", async (
     }
 });
 
-test("Upstage route sends Solar Pro 4 in direct response mode with priority instructions", async () => {
+test("Upstage route sends Solar Pro 4 in direct response mode with strict-fact instructions when checked", async () => {
     const originalFetch = globalThis.fetch;
     const originalApiKey = process.env.UPSTAGE_API_KEY;
     const originalApiUrl = process.env.UPSTAGE_API_URL;
@@ -72,6 +72,7 @@ test("Upstage route sends Solar Pro 4 in direct response mode with priority inst
             prompt: "과세특 본문을 작성하세요.",
             additionalInstructions: "개인별 수행 내용을 기준으로 작성",
             targetChars: 490,
+            strictFacts: true,
         }));
         const data = await response.json();
 
@@ -101,15 +102,15 @@ test("Upstage route sends Solar Pro 4 in direct response mode with priority inst
     assert.match(requestBody.messages[0].content, /【최우선 지침】[\s\S]*개인별 수행 내용을 기준으로 작성/);
     assert.match(requestBody.messages[0].content, /지침 충돌[\s\S]*설명하지/);
     assert.match(requestBody.messages[0].content, /주의[\s\S]*시스템 오류[\s\S]*재작성 요청/);
-    assert.match(requestBody.messages[0].content, /입력에 없는 사실/);
+    assert.match(requestBody.messages[0].content, /입력에 없는 새 활동.*측정 방법.*새 사실은 지어내지 않음/);
     assert.match(requestBody.messages[0].content, /각 활동의 핵심 수행과 지정된 성취 수준을 한 문장 안에 통합/);
     assert.match(requestBody.messages[0].content, /모든 활동을 최소 한 문장씩 먼저 완성/);
-    assert.match(requestBody.messages[0].content, /전체 활동에 분량을 균등하게 배분/);
+    assert.match(requestBody.messages[0].content, /검색 자료.*학생이 직접 한 활동의 근거로 삼지 않습니다/);
     assert.match(requestBody.messages[1].content, /^\[최우선 규칙\].*개인별 수행 내용을 기준으로 작성/s);
     assert.match(requestBody.messages[1].content, /\[다시 한번 강조\].*개인별 수행 내용을 기준으로 작성$/s);
 });
 
-test("Upstage route sends Solar Open 2 in direct response mode", async () => {
+test("Upstage route sends Solar Mini 4.5 with reasoning turned off", async () => {
     const originalFetch = globalThis.fetch;
     const originalApiKey = process.env.UPSTAGE_API_KEY;
     const originalModel = process.env.UPSTAGE_MODEL;
@@ -140,12 +141,12 @@ test("Upstage route sends Solar Open 2 in direct response mode", async () => {
         const response = await POST(jsonRequest({
             prompt: "과세특 본문을 작성하세요.",
             targetChars: 490,
-            model: "solar-open2",
+            model: "solar-mini-4-5-preview",
         }));
         const data = await response.json();
 
         assert.equal(response.status, 200);
-        assert.equal(data.model, "solar-open2");
+        assert.equal(data.model, "solar-mini-4-5-preview");
     } finally {
         globalThis.fetch = originalFetch;
         restoreEnv("UPSTAGE_API_KEY", originalApiKey);
@@ -155,11 +156,81 @@ test("Upstage route sends Solar Open 2 in direct response mode", async () => {
         restoreEnv("UPSTAGE_TEMPERATURE", originalTemperature);
     }
 
-    assert.equal(requestBody.model, "solar-open2");
-    assert.equal(requestBody.max_tokens, 131072);
+    assert.equal(requestBody.model, "solar-mini-4-5-preview");
+    assert.equal(requestBody.max_tokens, 16384);
     assert.equal(requestBody.reasoning_effort, "none");
-    assert.equal(requestBody.temperature, 1);
-    assert.equal(requestBody.top_p, 1);
+    assert.equal(requestBody.temperature, 0.1);
+    assert.equal(requestBody.top_p, undefined);
+});
+
+for (const model of ["solar-pro4", "solar-mini-4-5-preview"]) test(`${model} reviews a record against observations before returning it`, async () => {
+    const originalFetch = globalThis.fetch;
+    const originalApiKey = process.env.UPSTAGE_API_KEY;
+    const calls = [];
+    const sourceFacts = ["종이컵과 금속컵의 온도를 비교함."];
+    process.env.UPSTAGE_API_KEY = "upstage-test-key";
+    globalThis.fetch = async (_url, options) => {
+        calls.push(JSON.parse(options.body));
+        const content = calls.length === 1 ? "금속컵의 온도가 더 빠르게 낮아짐을 확인함." : sourceFacts[0];
+        return Response.json({ choices: [{ message: { content } }] });
+    };
+
+    try {
+        const response = await POST(jsonRequest({
+            prompt: "비교 활동을 기술하세요. 검색 참고: 금속의 열전도율.",
+            sourceFacts,
+            model,
+            targetChars: 150,
+            strictFacts: true,
+        }));
+
+        assert.equal(response.status, 200);
+        assert.equal((await response.json()).result, sourceFacts[0]);
+        assert.equal(calls.length, 2);
+        assert.equal(calls[1].model, model);
+        assert.equal(calls[1].reasoning_effort, "none");
+        assert.deepEqual(JSON.parse(calls[1].messages[1].content), {
+            sourceFacts,
+            mustKeep: [],
+            draft: "금속컵의 온도가 더 빠르게 낮아짐을 확인함.",
+        });
+        assert.match(calls[1].messages[0].content, /비교했다는 기록만으로 어느 쪽이 더 빨랐는지/);
+        assert.match(calls[1].messages[0].content, /성취도 평가는 유지/);
+    } finally {
+        globalThis.fetch = originalFetch;
+        restoreEnv("UPSTAGE_API_KEY", originalApiKey);
+    }
+});
+
+test("fact review keeps the draft when it deletes grade evaluation phrases", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalApiKey = process.env.UPSTAGE_API_KEY;
+    const calls = [];
+    const draft = "열의 이동 실험에서 온도 변화를 기록하며 관찰 역량이 돋보임. 실험 결과 보고서를 작성하며 연습이 더해지면 향상이 기대됨.";
+    process.env.UPSTAGE_API_KEY = "upstage-test-key";
+    globalThis.fetch = async (_url, options) => {
+        calls.push(JSON.parse(options.body));
+        const content = calls.length === 1 ? draft : "열의 이동 실험에서 온도 변화를 기록하고 실험 결과 보고서를 작성함.";
+        return Response.json({ choices: [{ message: { content } }] });
+    };
+
+    try {
+        const response = await POST(jsonRequest({
+            prompt: "과세특을 작성하세요.",
+            sourceFacts: ["열의 이동 실험에서 온도 변화를 기록함", "실험 결과 보고서를 작성함"],
+            keepTerms: ["돋보", "향상이 기대", "개별 지도"],
+            model: "solar-pro4",
+            targetChars: 300,
+            strictFacts: true,
+        }));
+        assert.equal(response.status, 200);
+        assert.equal((await response.json()).result, draft);
+        assert.deepEqual(JSON.parse(calls[1].messages[1].content).mustKeep, ["돋보", "향상이 기대"]);
+        assert.match(calls[1].messages[0].content, /mustKeep에 있는 평가 표현은 지우거나 바꾸지 말고/);
+    } finally {
+        globalThis.fetch = originalFetch;
+        restoreEnv("UPSTAGE_API_KEY", originalApiKey);
+    }
 });
 
 test("Upstage route uses the dedicated polite letter system message for home letters", async () => {
@@ -238,6 +309,7 @@ Target visible length: write 648-677 Korean visible characters for the 1500byte 
 <출력 형식>
 오직 본문만 출력`,
             targetChars: 589,
+            strictFacts: true,
         }));
         const data = await response.json();
 
@@ -252,13 +324,47 @@ Target visible length: write 648-677 Korean visible characters for the 1500byte 
     assert.doesNotMatch(userMessage, /1500byte|1275byte|Target visible length/);
     assert.match(userMessage, /본문은 559~571자 정도를 목표/);
     assert.match(userMessage, /글자수나 byte 수치를 직접 계산하거나 출력하지 않음/);
-    assert.match(userMessage, /핵심 키워드의 의미 범위 안에서/);
-    assert.match(userMessage, /수행 과정, 참여 태도, 사고 수준, 피드백 반영, 성취 수준/);
-    assert.match(userMessage, /같은 활동을 서로 다른 관찰 관점으로 풀어/);
-    assert.match(userMessage, /다섯 관점을 각각 별도 문장으로 빠짐없이/);
-    assert.match(userMessage, /모든 활동을 한 문장씩 먼저 작성/);
-    assert.match(userMessage, /작품명, 수상, 기관, 수치, 도구/);
+    assert.match(userMessage, /모든 활동의 핵심 수행과 성취 수준을 한 문장씩 먼저 작성/);
+    assert.match(userMessage, /입력에 명시된 개인별 수행과 관찰 내용을 구체화/);
+    assert.match(userMessage, /분량 목표보다 사실에 맞는 서술을 우선/);
     assert.match(userMessage, /<출력 형식>/);
+});
+
+test("Upstage route fills the length by default with creative observation guidance", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalApiKey = process.env.UPSTAGE_API_KEY;
+    const requests = [];
+
+    process.env.UPSTAGE_API_KEY = "upstage-test-key";
+    globalThis.fetch = async (_url, options) => {
+        requests.push(JSON.parse(options.body));
+        return Response.json({ choices: [{ message: { content: "자료를 조사하며 결과를 발표함." } }] });
+    };
+
+    try {
+        const response = await POST(jsonRequest({
+            prompt: "과세특 본문을 작성하세요.\n\n<분량 제한>\n전체 byte: 1500byte 이하\n\n<출력 형식>\n오직 본문만 출력",
+            additionalInstructions: "개인별 수행 내용을 기준으로 작성",
+            targetChars: 589,
+            sourceFacts: ["자료를 조사함."],
+            model: "solar-pro4",
+        }));
+        assert.equal(response.status, 200);
+    } finally {
+        globalThis.fetch = originalFetch;
+        restoreEnv("UPSTAGE_API_KEY", originalApiKey);
+    }
+
+    assert.equal(requests.length, 1, "체크하지 않으면 사실 대조 호출을 하지 않음");
+    const [systemMessage, userMessage] = requests[0].messages.map((message) => message.content);
+    assert.match(systemMessage, /창작·보완하여 다양한 관찰 문장으로 전개/);
+    assert.match(systemMessage, /아래 사용자 추가 지침은 기본 작성 규칙보다 우선합니다/);
+    assert.doesNotMatch(systemMessage, /분량 목표보다 사실에 맞는 서술을 우선/);
+    assert.match(userMessage, /본문은 559~571자 정도를 목표/);
+    assert.match(userMessage, /핵심 키워드의 의미 범위 안에서/);
+    assert.match(userMessage, /다섯 관점을 각각 별도 문장으로 빠짐없이/);
+    assert.match(userMessage, /같은 활동을 서로 다른 관찰 관점으로 풀어/);
+    assert.doesNotMatch(userMessage, /분량 목표보다 사실에 맞는 서술을 우선/);
 });
 
 test("Upstage route retries reasoning-only length responses with the model token budget", async () => {
@@ -338,7 +444,7 @@ test("Upstage route chooses max tokens and reasoning by model", async () => {
     };
 
     try {
-        for (const model of ["solar-mini", "solar-open2", "solar-pro2", "solar-pro3", "solar-pro4", "syn-pro"]) {
+        for (const model of ["solar-mini", "solar-mini-4-5-preview", "solar-pro2", "solar-pro3", "solar-pro4", "syn-pro"]) {
             process.env.UPSTAGE_MODEL = model;
             const response = await POST(jsonRequest({
                 prompt: "과세특 본문을 작성하세요.",
@@ -358,7 +464,7 @@ test("Upstage route chooses max tokens and reasoning by model", async () => {
         requests.map((request) => [request.model, request.max_tokens, request.reasoning_effort]),
         [
             ["solar-mini", 16384, undefined],
-            ["solar-open2", 131072, "none"],
+            ["solar-mini-4-5-preview", 16384, "none"],
             ["solar-pro2", 16384, "low"],
             ["solar-pro3", 65536, "low"],
             ["solar-pro4", 4096, "none"],

@@ -12,7 +12,9 @@ const RECORD_ENDINGS = "함|음|임|됨|봄|옴|줌|춤|움|늠|름|남|냄|김|
 // 문장 중간 마침표 삽입 경계: 단음절 어미 전체를 허용하면 다음·매체마다·글감·흐름 같은
 // 일반 명사 뒤에 마침표가 찍혀 문장이 훼손되므로, 안전한 동사형 종결과
 // ㄴ받침 평서형(~한다·높인다)만 경계로 인정함 (보다·마다·바다 제외)
-const RECORD_SENTENCE_BOUNDARY_ENDINGS = `${RECORD_VERBAL_ENDING_SOURCE}|(?<=[가-힣])(?<![보마바])다`;
+// ㄴ받침 글자(한·인·는 등)만 모은 문자 집합. '데려다 주며'·'가져다 놓음'의 '다'는 경계가 아님
+const NIEUN_FINAL_SYLLABLES = Array.from({ length: 399 }, (_, index) => String.fromCharCode(0xac00 + index * 28 + 4)).join("");
+const RECORD_SENTENCE_BOUNDARY_ENDINGS = `${RECORD_VERBAL_ENDING_SOURCE}|(?<=[${NIEUN_FINAL_SYLLABLES}])다`;
 const RECORD_CLOSABLE_ENDING_PATTERN = new RegExp(`(?:${RECORD_SENTENCE_BOUNDARY_ENDINGS})$`);
 const LETTER_ENDINGS = "습니다|합니다|입니다|됩니다|바랍니다|드립니다|좋겠습니다|필요합니다|응원합니다";
 const LETTER_CLOSABLE_ENDING_PATTERN = new RegExp(`(?:${LETTER_ENDINGS})$`);
@@ -25,6 +27,8 @@ const LETTER_SUBJECT_PATTERN = /(?:^|\s)(학생은|학생이|OO가|OO는|자녀�
 const PAST_TENSE_PATTERN = /(?:했|하였|였|되었|보였|시켰)(?:음|으며|으나|지만|고|던|다고|다는|기에|어|습니다|다)/;
 const SUMMARY_CLOSING_PATTERN = /(^|[.!?]\s*)(이러한|이를 통해|이와 같이|앞으로|향후|결과적으로|종합적으로|요약하면|결론적으로|모든 활동에서|각 활동에서|모든 상황에서)\s*/;
 const COMMON_CLOSING_TRANSITION_PATTERN = /(^|[.!?]\s*)(마지막으로|끝으로|마무리하며|덧붙여|추가로)\s*/;
+// 등급 설명·작성 지시문이 본문에 그대로 옮겨진 흔적 (예: "잘 해냄 기조를 유지하며", "협력 태도가 드러나게 하며")
+const PROMPT_LEAK_PATTERN = /(?:기조를\s*유지|드러나게\s*(?:하며|하고|서술|씀|작성)|(?:참여\s*과정|자료\s*정리|협력\s*태도)·(?:참여\s*과정|자료\s*정리|협력\s*태도))/;
 const META_TEXT_PATTERN = /(글자수\s*[:：]?|\d+\s*(?:[bB][yY][tT][eE]|바이트)|분량\s*초과|마지막\s*문장\s*줄임|검증\s*포인트|Why-How-What-Learn|구조를\s*적용해\s*확장|(^|[\r\n])\s*분석\s*[:：]|다음은|작성한\s*내용|본문은|키워드가\s*입력되지|입력해\s*주시면|알려주시면|완성해\s*드리겠습니다|작성해\s*드리겠습니다|즉시\s*작성|※\s*주의|시스템\s*오류|재작성\s*요청|사용자\s*추가\s*지침|지침\s*충돌)/;
 const LIST_OR_TITLE_PATTERN = /(^|\n)\s*(?:[-*]|[0-9]+[.)])\s+/;
 const RECORD_GRADE_LABEL_PATTERN = /(?:활동\s*\d+\s*)?[\[(]\s*[A-E]\s*[\])]|(?:^|[\s"'“”‘’])(?:[A-E]\s*(?:등급|급)|등급\s*[A-E])(?=$|[\s,.!?)]|[가-힣])/;
@@ -80,6 +84,8 @@ const ISSUE_LABELS = {
     past_tense: "과거형 표현 포함",
     summary_closing: "요약/마무리 표현 포함",
     meta_text: "메타 설명 포함",
+    prompt_leak: "작성 지시문이 본문에 섞임",
+    repetition: "같은 내용 반복",
     list_or_title: "목록/제목 형식 포함",
     incomplete_sentence: "문장 종결 불완전",
     sentence_spacing: "문장 마침표/띄어쓰기 오류",
@@ -88,6 +94,7 @@ const ISSUE_LABELS = {
     direct_advice: "직접 지시형 표현 포함",
     missing_required_term: "필수 설정 용어 누락",
     missing_required_content: "필수 활동 또는 성취 표현 누락",
+    activity_order: "공통 활동 순서 불일치",
     banned_term: "설정과 충돌하는 용어 포함",
     missing_advice_domain: "방학 조언 영역 부족",
 };
@@ -152,6 +159,58 @@ function formatSentenceSpacing(text, mode = "record") {
     return result;
 }
 
+// 같은 글 안의 되풀이: 어절 5개가 그대로 이어지는 구절이 다른 문장에 다시 나오거나,
+// 두 문장의 글자 짝(bigram)이 65% 이상 겹치면 반복으로 본다.
+// (오늘 테스트에서 '반복이 심하다'고 본 결과는 걸리고, 정상 결과는 대부분 통과하는 기준)
+const REPEATED_EOJEOL_COUNT = 5;
+const SIMILAR_SENTENCE_RATIO = 0.65;
+const SIMILAR_SENTENCE_MIN_CHARS = 20;
+
+function getCharacterBigrams(sentence) {
+    const compact = sentence.replace(/[\s.,!?]/g, "");
+    return Array.from({ length: Math.max(0, compact.length - 1) }, (_, index) => compact.slice(index, index + 2));
+}
+
+function getBigramSimilarity(left, right) {
+    const leftBigrams = getCharacterBigrams(left);
+    const rightBigrams = getCharacterBigrams(right);
+    const counts = new Map();
+    leftBigrams.forEach((bigram) => counts.set(bigram, (counts.get(bigram) || 0) + 1));
+    let shared = 0;
+    rightBigrams.forEach((bigram) => {
+        if ((counts.get(bigram) || 0) > 0) {
+            shared += 1;
+            counts.set(bigram, counts.get(bigram) - 1);
+        }
+    });
+    return (2 * shared) / ((leftBigrams.length + rightBigrams.length) || 1);
+}
+
+export function findRepeatedContent(text) {
+    const sentences = String(text || "").split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter(Boolean);
+    const firstSentenceByPhrase = new Map();
+    for (let index = 0; index < sentences.length; index += 1) {
+        const words = sentences[index].replace(/[.,!?]/g, "").split(/\s+/).filter(Boolean);
+        for (let start = 0; start + REPEATED_EOJEOL_COUNT <= words.length; start += 1) {
+            const phrase = words.slice(start, start + REPEATED_EOJEOL_COUNT).join(" ");
+            if (!firstSentenceByPhrase.has(phrase)) {
+                firstSentenceByPhrase.set(phrase, index);
+            } else if (firstSentenceByPhrase.get(phrase) !== index) {
+                return `'${phrase}' 구절 반복`;
+            }
+        }
+    }
+    const longSentences = sentences.filter((sentence) => sentence.replace(/\s/g, "").length >= SIMILAR_SENTENCE_MIN_CHARS);
+    for (let i = 0; i < longSentences.length; i += 1) {
+        for (let j = i + 1; j < longSentences.length; j += 1) {
+            if (getBigramSimilarity(longSentences[i], longSentences[j]) >= SIMILAR_SENTENCE_RATIO) {
+                return `'${longSentences[j].slice(0, 30)}…' 문장이 앞 문장과 거의 같음`;
+            }
+        }
+    }
+    return "";
+}
+
 function addIssue(issues, code, detail = "") {
     issues.push({
         code,
@@ -212,6 +271,7 @@ function getRequiredContentGroups(groups) {
         .map((group) => ({
             label: String(group?.label || "필수 내용").trim(),
             terms: getRuleTerms(group?.terms),
+            inOrder: group?.inOrder === true,
         }))
         .filter((group) => group.terms.length > 0);
 }
@@ -391,9 +451,20 @@ export function validateGeneratedText(text, options = {}) {
     }
 
 
-    for (const group of getRequiredContentGroups(requiredContentGroups)) {
+    const contentGroups = getRequiredContentGroups(requiredContentGroups);
+    const orderedGroups = contentGroups.filter((group) => group.inOrder);
+    const sentences = orderedGroups.length ? splitCompleteSentences(trimmed) : [];
+    let lastActivityPosition = -1;
+    for (const group of contentGroups) {
         if (!group.terms.some((term) => hasRequiredContentEvidence(trimmed, term))) {
             addIssue(issues, "missing_required_content", `${group.label}: ${group.terms.join(" / ")}`);
+        } else if (group.inOrder) {
+            const position = sentences.findIndex((sentence) => group.terms.some((term) => hasRequiredContentEvidence(sentence, term)));
+            if (position < 0) continue;
+            if ((group === orderedGroups[0] && position !== 0) || position < lastActivityPosition) {
+                addIssue(issues, "activity_order", `${group.label}: 공통 활동1부터 입력 순서대로 서술`);
+            }
+            lastActivityPosition = Math.max(position, lastActivityPosition);
         }
     }
 
@@ -440,6 +511,15 @@ export function validateGeneratedText(text, options = {}) {
         addIssue(issues, "meta_text");
     }
 
+    if (mode === "record" && PROMPT_LEAK_PATTERN.test(trimmed)) {
+        addIssue(issues, "prompt_leak", "등급 설명이나 작성 지시를 옮기지 말고 학생의 수행으로 서술");
+    }
+
+    const repeatedContent = mode === "record" ? findRepeatedContent(trimmed) : "";
+    if (repeatedContent) {
+        addIssue(issues, "repetition", `${repeatedContent}. 같은 구절과 같은 내용을 되풀이하지 말고 다른 관찰 관점으로 서술`);
+    }
+
     if (LIST_OR_TITLE_PATTERN.test(source)) {
         addIssue(issues, "list_or_title");
     }
@@ -454,7 +534,7 @@ export function validateGeneratedText(text, options = {}) {
     };
 }
 
-export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars, maxTargetBytes = 0, minTargetBytes = 0, minTargetChars = 0, mode = "record", forbiddenTerms = [], requiredTerms = [], requiredContentGroups = [], bannedTerms = [], activityToneRules = [], preserveTextOnLengthRepair = false }) {
+export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars, maxTargetBytes = 0, minTargetBytes = 0, minTargetChars = 0, mode = "record", forbiddenTerms = [], requiredTerms = [], requiredContentGroups = [], bannedTerms = [], activityToneRules = [], preserveTextOnLengthRepair = false, strictFacts = false }) {
     const maxAllowed = clampTargetChars(targetChars);
     const minAllowed = Math.max(0, Math.min(Math.floor(Number(minTargetChars) || 0), maxAllowed));
     const minAllowedBytes = Math.max(0, Math.floor(Number(minTargetBytes) || 0));
@@ -463,10 +543,10 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
     const missingBytes = Math.max(0, minAllowedBytes - currentBytes);
     const issueCodes = new Set((issues || []).map((issue) => issue.code));
     const isLengthShortfall = issueCodes.has("under_min_bytes") || issueCodes.has("under_min_chars");
-    const hasMissingRequiredContent = issueCodes.has("missing_required_content");
-    const shouldPreserveShortfallText = preserveTextOnLengthRepair
+    const hasMissingRequiredContent = issueCodes.has("missing_required_content") || issueCodes.has("activity_order");
+    const shouldPreserveShortfallText = mode === "record" && preserveTextOnLengthRepair
         && isLengthShortfall
-        && !hasMissingRequiredContent;
+        && hasOnlyNonBlockingGenerationIssues(issues, mode);
     const visibleRange = shouldPreserveShortfallText
         ? {
             min: Math.max(1, Math.ceil(missingBytes / 3)),
@@ -503,7 +583,7 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
             return `  · ${rule.label}(${rule.grade}): ${required}, ${forbidden} 표현은 이 활동 서술에 쓰지 않음`;
         }).join("\n")}\n  · 필수 표현은 활동마다 같은 문장 틀로 반복하지 말고 각 활동의 수행 내용과 결합해 서로 다른 문장으로 표현함`
         : "";
-    const expansionFramework = getExpansionFrameworkGuideline();
+    const expansionFramework = getExpansionFrameworkGuideline(strictFacts, mode);
     const endingInstruction = mode === "letter"
         ? "- 경어체 문장으로 작성하고 '~습니다.', '~합니다.', '~바랍니다.'처럼 완전한 문장으로 끝냄"
         : "- 현재형 명사 종결어미(~함, ~음, ~임, ~보임, ~드러남)와 마침표로 끝냄";
@@ -513,16 +593,25 @@ export function buildRepairPrompt({ text, issues, sourcePrompt = "", targetChars
     const sentenceSpacingInstruction = "\n- 문장이 끝나면 반드시 마침표(.)를 찍고 한 칸 띄움. 마지막 문장은 마침표(.)를 찍고 바로 종료";
 
     const shortfallRewriteInstruction = shouldPreserveShortfallText
-        ? `기존 본문은 시스템이 유지합니다. 기존 본문을 다시 출력하거나 요약하지 말고, 핵심 키워드의 다른 관찰 관점과 성취 수준을 담아 뒤에 추가할 새 문장만 반환하세요.`
+        ? strictFacts
+            ? `기존 본문은 시스템이 유지합니다. 기존 본문을 다시 출력하거나 요약하지 말고, 아래 원래 입력에 있고 기존 본문에서 아직 다루지 않은 관찰 사실이 있으면 이를 담아 뒤에 추가할 새 문장만 반환하세요.`
+            : `기존 본문은 시스템이 유지합니다. 기존 본문을 다시 출력하거나 요약하지 말고, 핵심 키워드의 다른 관찰 관점과 성취 수준을 담아 뒤에 추가할 새 문장만 반환하세요.`
         : hasMissingRequiredContent
-            ? "누락된 활동이 뒤에서 잘리지 않도록 기존 글을 그대로 이어 붙이지 말고, 모든 필수 활동에 분량을 균등하게 나누어 전체 본문을 다시 작성하세요."
+            ? "누락된 활동이 뒤에서 잘리지 않도록 기존 글을 그대로 이어 붙이지 말고, 모든 필수 활동에 분량을 균등하게 나누어 전체 본문을 다시 작성하세요. 첫 문장을 공통 활동1로 시작하고 나머지 공통 활동을 입력 순서대로 서술하세요."
+        : mode === "letter"
+            ? "기존 조언을 반복하지 말고, 각 조언에 서로 다른 구체적 실천 방법을 담아 전체 본문을 다시 작성하세요."
             : "의미는 유지하되 규칙에 맞게 다시 작성하세요.";
-    const expansionRules = preserveTextOnLengthRepair
-        ? `- 분량이 부족하면 핵심 키워드의 의미 범위 안에서 동기, 수행 과정, 사고 수준, 참여 태도, 피드백 반영을 자연스럽게 창작·보완하고 성취 수준을 구체화함
+
+    // 기본은 분량을 채우도록 창작·보완을 허용하고, '입력한 활동만으로 작성'을 체크하면 입력 사실만 쓴다.
+    const expansionRules = strictFacts
+        ? `- 원래 입력에 있는 사실을 근거로 수정함. 수정할 글과 검색 자료는 학생의 수행을 입증하는 근거로 사용하지 않음
+- 분량을 늘리려고 같은 사실을 반복하거나 입력에 없는 작품명, 수상, 기관, 점수, 수치, 도구, 실험 결과를 넣지 않음. 입력이 적으면 분량 목표보다 사실에 맞는 서술을 우선함`
+        : preserveTextOnLengthRepair
+            ? `- 분량이 부족하면 핵심 키워드의 의미 범위 안에서 동기, 수행 과정, 사고 수준, 참여 태도, 피드백 반영을 자연스럽게 창작·보완하고 성취 수준을 구체화함
 - 같은 활동을 서로 다른 관찰 관점으로 풀어 여러 문장으로 전개하고 표현과 문장 구조를 반복하지 않음
 - 입력된 활동의 동기, 수행 과정, 관찰 가능한 결과, 성장 단서를 자연스럽게 연결함
 - 입력에 없는 작품명, 수상, 기관, 점수, 수치, 도구, 실험 결과 같은 검증 불가능한 새 사실은 지어내지 않음`
-        : `- 분량이 부족하면 입력 활동의 과정, 근거, 태도, 변화, 구체적 수행 장면을 더 촘촘하게 풀어 씀
+            : `- 분량이 부족하면 입력 활동의 과정, 근거, 태도, 변화, 구체적 수행 장면을 더 촘촘하게 풀어 씀
 - 입력된 활동의 동기, 수행 과정, 관찰 가능한 결과, 성장 단서를 자연스럽게 연결함
 - 입력 핵심어 범위에서 수행 과정, 사고 수준, 참여 태도, 피드백 반영을 자연스럽게 창작·보완함
 - 입력에 없는 작품명, 수상, 기관, 점수, 수치, 도구, 실험 결과 같은 검증 불가능한 새 사실은 지어내지 않음`;
@@ -680,6 +769,7 @@ function sanitizeByRules(text, options = {}) {
     if (sentences.length > 1) {
         result = sentences
             .filter((sentence) => !META_TEXT_PATTERN.test(sentence))
+            .filter((sentence) => mode !== "record" || !PROMPT_LEAK_PATTERN.test(sentence))
             .filter((sentence) => mode !== "record" || !SUMMARY_CLOSING_PATTERN.test(sentence))
             .filter((sentence) => !COMMON_CLOSING_TRANSITION_PATTERN.test(sentence))
             .filter((sentence, index, allSentences) => allSentences.indexOf(sentence) === index)
@@ -871,13 +961,9 @@ function repairLetterRequiredTerms(text, options = {}) {
 
 function repairLetterText(text, options = {}) {
     if (options.mode !== "letter") return text;
-    return appendLetterAdviceDomains(
-        expandLetterToMinimum(
-            repairLetterRequiredTerms(text, options),
-            options,
-        ),
-        options,
-    );
+    const withRequiredTerms = repairLetterRequiredTerms(text, options);
+    const revisedText = options.skipLengthPadding ? withRequiredTerms : expandLetterToMinimum(withRequiredTerms, options);
+    return appendLetterAdviceDomains(revisedText, options);
 }
 
 export async function generateWithSilentValidation({
@@ -899,6 +985,7 @@ export async function generateWithSilentValidation({
     preserveTextOnLengthRepair = false,
     preferBestCandidateOnFailure = false,
     stripExpandedGradeLabels = false,
+    strictFacts = false,
 }) {
     if (typeof generateOnce !== "function") {
         throw new Error("generateOnce 함수가 필요합니다.");
@@ -910,6 +997,11 @@ export async function generateWithSilentValidation({
     let bestCandidate = null;
     const hasByteTarget = Number(minTargetBytes) > 0 || Number(maxTargetBytes) > 0;
     const effectiveMinTargetChars = minTargetChars ?? (hasByteTarget ? 0 : getMinimumTargetChars(targetChars));
+    const letterRepairOptions = {
+        mode, requiredTerms, targetChars, maxTargetBytes, minTargetBytes,
+        minTargetChars: effectiveMinTargetChars, requiredAdviceDomains,
+        skipLengthPadding: preserveTextOnLengthRepair,
+    };
 
     for (let attempt = 0; attempt <= maxRepairAttempts; attempt += 1) {
         const rawText = await generateOnce(nextPrompt, {
@@ -917,7 +1009,7 @@ export async function generateWithSilentValidation({
             previousText: lastText,
             previousValidation: lastValidation,
         });
-        const shouldAppendLengthRepair = preserveTextOnLengthRepair
+        const shouldAppendLengthRepair = mode === "record" && preserveTextOnLengthRepair
             && attempt > 0
             && lastText
             && hasOnlyNonBlockingGenerationIssues(lastValidation?.issues || [], mode);
@@ -929,15 +1021,7 @@ export async function generateWithSilentValidation({
         });
         if (mode === "letter") {
             text = finalizeGeneratedText(
-                repairLetterText(text, {
-                    maxTargetBytes,
-                    minTargetBytes,
-                    minTargetChars: effectiveMinTargetChars,
-                    mode,
-                    requiredAdviceDomains,
-                    requiredTerms,
-                    targetChars,
-                }),
+                repairLetterText(text, letterRepairOptions),
                 targetChars,
                 maxTargetBytes,
                 mode,
@@ -1001,13 +1085,14 @@ export async function generateWithSilentValidation({
             activityToneRules,
             preserveTextOnLengthRepair,
             requiredAdviceDomains,
+            strictFacts,
         });
     }
 
     const sanitized = finalizeGeneratedText(
         repairLetterText(
             sanitizeByRules(lastText, { forbiddenTerms, mode }),
-            { mode, requiredTerms, targetChars, maxTargetBytes, minTargetBytes, minTargetChars: effectiveMinTargetChars, requiredAdviceDomains },
+            letterRepairOptions,
         ),
         targetChars,
         maxTargetBytes,

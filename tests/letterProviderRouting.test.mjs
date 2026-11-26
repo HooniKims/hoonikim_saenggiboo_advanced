@@ -179,7 +179,7 @@ test("letter page sends letter output type to external providers", () => {
     assert.match(source, /maxRepairAttempts:\s*2/);
     assert.match(source, /키워드는 목록처럼 나열하지 말고 문장 속에서 자연스럽게 풀어 쓸 것/);
     assert.match(source, /키워드\(학업, 건강, 교우관계 등\)는 관찰 사실이 아니라 방학 동안 가정에서 살필 조언 영역으로 사용할 것/);
-    assert.match(source, /학교생활을 성실하게 잘 수행했다는 일반적인 뉘앙스로 시작하되 매번 표현을 다르게 할 것/);
+    assert.match(source, /첫 문장에서만 학교생활에 성실히 참여했다는 일반적 평가를 쓰고, 두 번째 문장부터는 방학에 실천할 조언/);
     assert.match(source, /입력되지 않은 구체적인 활동, 실험, 탐구 주제, 수행 장면은 지어내지 말 것/);
     assert.match(source, /추가 정보를 요청하지 말고 입력된 키워드만으로 완성할 것/);
     assert.match(source, /학교에서 보여준 모습은 과거 경어체/);

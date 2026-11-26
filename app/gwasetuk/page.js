@@ -5,14 +5,15 @@ import { Plus, Trash2, Upload, Download, Wand2, FileSpreadsheet, Users, UserX, C
 import * as XLSX from "xlsx";
 import { writeExcel } from "../../utils/excel";
 import { getCharacterGuideline, getMinimumTargetBytes, getUtf8ByteLength, normalizeTargetBytes, normalizeTargetChars } from "../../utils/textProcessor";
-import { fetchStream, AVAILABLE_MODELS, DEFAULT_MODEL, getModelOptionLabel, isLightweightModel, isNvidiaModel, isUpstageModel } from "../../utils/streamFetch";
+import { fetchStream, AVAILABLE_MODELS, DEFAULT_MODEL, getModelOptionLabel, isLightweightModel, isNvidiaModel, isFactCheckedUpstageModel, isUpstageModel } from "../../utils/streamFetch";
 import { fetchNvidiaCompletion } from "../../utils/nvidiaFetch";
 import { fetchOpenAICompletion } from "../../utils/openAIFetch";
 import { fetchUpstageCompletion } from "../../utils/upstageFetch";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
+import StrictFactsToggle from "../../components/StrictFactsToggle";
 import { generateWithSilentValidation } from "../../utils/generationHarness";
-import { generateWithLocalSolarFallback } from "../../utils/localSolarFallback";
+import { generateWithLocalSolarFallback, getSolarFallbackNotice } from "../../utils/localSolarFallback";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { fetchSearchContext } from "../../utils/searchContextFetch";
 import { limitActivitiesByTargetChars, mergeNumberedIndividualActivities, shouldSelectRandomFourActivities } from "../../utils/activitySelection";
@@ -23,12 +24,18 @@ const GRADE_OPTIONS = ["A", "B", "C", "D", "E"];
 // D/E는 긍정 문장에 섞여도 매칭되는 중립 명사구 대신 극성이 내장된 구절만 사용함
 // (예전 "기본 요건"·"개별 지도"는 칭찬 문장 안에서도 검증을 통과시켜 톤 역전을 놓쳤음)
 const SOLAR_GRADE_EVIDENCE = {
-    A: ["주도적으로 탐구", "심화 질문", "높은 수준", "새로운 관점", "구체적 성과", "돋보"],
+    A: ["돋보", "뛰어남", "높은 수준", "탁월"],
     B: ["안정적으로 수행", "핵심 내용을 이해", "충실히 수행", "결과를 완성", "잘 해냄"],
     C: ["연습이 요구", "연습이 더해지면", "익혀 가는 과정", "높일 여지", "향상이 기대"],
     D: ["반복적인 안내", "지속적인 교사 지원", "다시 확인할 필요", "적용에 어려움"],
     E: ["기본 요건을 충족하는 데 어려움", "매우 많은 보완이 요구", "지속적인 개별 지도", "기초 학습 지원이 필요", "절차부터 다시 익힐"],
 };
+// 기본(분량 채우기) 모드의 A 등급은 주도적 탐구·심화 질문처럼 수행을 확장하는 표현을 쓴다.
+// '입력한 활동만으로 작성'을 체크하면 새 행동을 암시하지 않는 평가 표현(SOLAR_GRADE_EVIDENCE.A)만 쓴다.
+const FILL_A_GRADE_EVIDENCE = ["주도적으로 탐구", "심화 질문", "높은 수준", "새로운 관점", "구체적 성과", "돋보"];
+const getGradeEvidence = (grade, strictFacts) => (
+    grade === "A" && !strictFacts ? FILL_A_GRADE_EVIDENCE : SOLAR_GRADE_EVIDENCE[grade]
+);
 // 활동별 프롬프트 지침용: 해당 등급 서술에서 쓰면 안 되는 다른 등급의 대표 표현
 const GRADE_TONE_AVOID = {
     A: ["보완이 필요", "연습이 요구", "어려움이 큼", "반복적인 안내", "개별 지도"],
@@ -95,6 +102,7 @@ export default function GwasetukPage() {
     const [isGenerating, setIsGenerating] = useState(false);
     const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
     const [useWebSearchContext, setUseWebSearchContext] = useState(false);
+    const [useStrictFacts, setUseStrictFacts] = useState(false); // 입력한 활동 내용만으로 작성
     const [copiedId, setCopiedId] = useState(null);
     const fileInputRef = useRef(null);
     const activityInputRefs = useRef([]);
@@ -287,15 +295,17 @@ export default function GwasetukPage() {
 
     const generatePrompt = (student, selectedActivities, targetChars, individualActivity = "", model = "", searchContext = "") => {
         const gradeDescriptions = {
-            A: "A(매우 잘함) - 활동의 깊이와 수준이 높으며, 주도적 탐구·심화 질문·융합적 사고·구체적 성과가 분명히 드러나게 서술",
-            B: "B(잘함) - 잘 해냄 기조를 유지하며 과제를 성실히 완수하고 핵심 개념을 이해한 모습, 참여 과정·자료 정리·협력 태도가 드러나게 서술하되 A 수준의 탁월함·돋보임·뛰어남으로 과장하지 않음",
+            A: useStrictFacts
+                ? "A(매우 잘함) - 입력된 수행에서 드러나는 높은 성취를 구체적으로 평가함"
+                : "A(매우 잘함) - 활동의 깊이와 수준이 높으며, 주도적 탐구·심화 질문·융합적 사고·구체적 성과가 분명히 드러나게 서술",
+            B: "B(잘함) - 과제를 성실히 완수하고 핵심 개념을 이해한 수준으로 평가함. 참여 과정, 자료 정리, 협력 모습을 학생의 수행 문장으로 풀어 쓰고, A 수준의 탁월함·돋보임·뛰어남으로 과장하지 않음",
             C: "C(보완 필요) - 활동에 성실히 참여한 사실을 먼저 인정하고, 핵심 개념과 표현을 익혀 가는 과정에 있으며 연습이 더해지면 향상이 기대된다는 성장 관점으로 부드럽게 서술. '도달하지 못함', '미흡함', '부족함' 같은 직접적인 결핍 서술은 쓰지 않음",
             D: "D(많은 보완 필요) - 활동 참여, 기초 이해, 결과 완성도에서 반복적인 교사 안내와 많은 보완이 필요한 지점을 C보다 더 분명하게 서술",
             E: "E(매우 많은 보완 필요) - 활동 수행의 기본 요건을 충족하는 데 어려움이 크며, 지속적인 개별 지도와 기초 학습 지원이 필요한 지점을 D보다 더 낮은 수행 수준으로 서술하되 비난하거나 낙인찍는 표현은 사용하지 않음"
         };
 
         const targetBytes = normalizeTargetBytes(textLength, manualLength);
-        const lengthInstruction = getCharacterGuideline(targetChars, targetBytes, getMinimumTargetBytes(targetBytes));
+        const lengthInstruction = getCharacterGuideline(targetChars, targetBytes, getMinimumTargetBytes(targetBytes), { strictFacts: useStrictFacts });
 
         const schoolLevelMap = {
             elementary: "초등학생",
@@ -337,9 +347,11 @@ export default function GwasetukPage() {
         // (경량 모델이 등급 지시를 무시하고 E를 칭찬문으로 쓰는 역전을 막는 1차 방어선.
         //  2차 방어선은 generationHarness의 활동 구간별 grade_tone_mismatch 검증)
         const activityToneGuideline = selectedActivityEntries.map((entry, i) => {
-            const usePhrases = SOLAR_GRADE_EVIDENCE[entry.grade].slice(0, 3).map((term) => `'${term}'`).join(" 또는 ");
+            const usePhrases = getGradeEvidence(entry.grade, useStrictFacts).slice(0, 3).map((term) => `'${term}'`).join(" 또는 ");
             const avoidPhrases = GRADE_TONE_AVOID[entry.grade].map((term) => `'${term}'`).join(", ");
-            return `- 활동${i + 1}(${entry.grade}): 이 활동 서술 안에 ${usePhrases} 표현을 반드시 포함하고, ${avoidPhrases} 표현은 이 활동 서술에 쓰지 않음`;
+            return useStrictFacts
+                ? `- 활동${i + 1}(${entry.grade}): 입력된 수행을 평가할 때 ${usePhrases} 중 하나를 사용하고, ${avoidPhrases} 표현은 쓰지 않음`
+                : `- 활동${i + 1}(${entry.grade}): 이 활동 서술 안에 ${usePhrases} 표현을 반드시 포함하고, ${avoidPhrases} 표현은 이 활동 서술에 쓰지 않음`;
         }).join("\n")
             + "\n- 위 필수 표현은 각 활동의 실제 수행 내용과 결합해 서로 다른 문장으로 녹여 쓰고, 같은 문장 틀을 활동마다 그대로 복사하듯 반복하지 않음";
 
@@ -351,10 +363,11 @@ ${activityToneGuideline}
 
 [출력 금지]
 - 등급 기호와 라벨은 내부 반영 기준일 뿐이며 [A], (A), A등급, 활동1[A] 같은 표기를 본문에 절대 출력하지 않음
+- 등급 설명과 작성 지시 문구('~기조를 유지', '~가 드러나게 서술')를 본문에 옮겨 쓰지 않고, 학생이 한 행동과 평가 문장으로만 씀
 
 [등급별 표현 사전]
-- A 전용 권장 표현: 주도적으로 탐구함, 심화 질문을 제기함, 근거를 종합해 설명함, 새로운 관점으로 연결함, 구체적 성과를 보임, 높은 수준의 이해를 드러냄
-- B 전용 권장 표현: 과제를 안정적으로 수행함, 핵심 내용을 이해함, 맡은 역할을 충실히 수행함, 자료를 정리해 참여함, 활동 절차를 잘 따라가며 결과를 완성함, 잘 해냄 기조를 유지함
+- A 전용 권장 표현: ${useStrictFacts ? "역량이 돋보임, 수행이 뛰어남, 높은 수준의 이해를 드러냄" : "주도적으로 탐구함, 심화 질문을 제기함, 근거를 종합해 설명함, 새로운 관점으로 연결함, 구체적 성과를 보임, 높은 수준의 이해를 드러냄"}
+- B 전용 권장 표현: 과제를 안정적으로 수행함, 핵심 내용을 이해함, 맡은 역할을 충실히 수행함, 자료를 정리해 참여함, 활동 절차를 잘 따라가며 결과를 완성함, 맡은 과제를 잘 해냄
 - C 전용 권장 표현: 활동에 성실히 참여하며 핵심 개념을 익혀 가는 과정에 있음, 표현의 구체성을 높일 여지가 있어 단계적인 연습이 더해지면 향상이 기대됨, 결과의 완성도를 높이기 위한 연습이 요구됨
 - D 전용 권장 표현: 반복적인 안내가 필요함, 활동 절차 이해와 적용에 어려움이 있어 많은 보완이 요구됨, 자료 정리와 결과 완성 과정에서 지속적인 교사 지원이 필요함, 기초 개념을 다시 확인할 필요가 있음
 - E 전용 권장 표현: 활동 수행의 기본 요건을 충족하는 데 어려움이 큼, 지속적인 개별 지도와 기초 학습 지원이 필요한 지점이 뚜렷함, 참여 과정과 결과 완성 모두에서 매우 많은 보완이 요구됨, 기본 활동 절차부터 다시 익힐 필요가 있음
@@ -366,7 +379,7 @@ ${activityToneGuideline}
 - D 활동은 C보다 더 뚜렷하게 반복적인 안내와 보완 필요성을 드러냄
 - E 활동은 D보다 더 낮은 수행 수준으로, 활동 수행의 기본 요건 충족 어려움과 지속적인 개별 지도와 기초 학습 지원이 필요한 지점을 드러냄
 - 같은 학생 안에서도 활동별 등급이 다르면 문장 강도와 성취 표현을 반드시 다르게 씀
-- A는 최고 수준의 성취, B는 안정적 수행, C는 성실한 참여와 성장 여지, D는 많은 보완, E는 매우 많은 보완으로 서술 기조를 구분함
+${useStrictFacts ? "- 등급은 평가의 강도에만 반영하며, 등급만으로 새로운 행동이나 결과를 추정하지 않음\n" : ""}- A는 최고 수준의 성취, B는 안정적 수행, C는 성실한 참여와 성장 여지, D는 많은 보완, E는 매우 많은 보완으로 서술 기조를 구분함
 - C 활동은 B 수준의 안정적 수행으로 올려 쓰지 않음
 - D와 E 활동을 C 수준으로 완화하지 않음
 - C는 성장 여지를 부드럽게 담고, D와 E는 단계적으로 더 뚜렷한 수행 제한을 담되, 비난하거나 낙인찍는 표현은 사용하지 않음
@@ -451,7 +464,7 @@ ${solarActivityPlan}
 3. [절대금지] 과거형 표현 금지 (~했음, ~였음, ~되었음, ~하였음, ~보였음). 반드시 현재형 명사 종결어미(~함, ~임, ~음, ~보임, ~드러남)만 사용
 4. ${targetLevel} 수준에 맞는 어휘 사용
 5. 줄바꿈 없이 하나의 문단으로 작성
-6. 입력된 ${totalActivities}개 활동 내용을 모두 빠짐없이 서술하고, 활동 내용 목록의 순서를 유지하며, 입력에 없는 사실은 추가하지 않음
+6. 입력된 ${totalActivities}개 활동 내용을 모두 빠짐없이 서술하고, 활동 내용 목록의 순서를 유지하며, ${useStrictFacts ? "입력에 없는 사실은 추가하지 않음" : "입력에 없는 작품명·수상·수치·실험 결과 같은 구체 사실은 추가하지 않음"}
 7. 첫 문장은 반드시 위 <활동 내용>의 활동1 공통 활동으로 시작하고, [이 학생의 개별 활동 내용]이나 검색 보강 자료를 첫 활동처럼 앞세우지 않음
 8. 마지막 문장도 반드시 구체적인 활동 내용이나 학습 과정 서술로 끝냄
 9. '이러한', '이를 통해', '이와 같이', '앞으로', '향후', '결과적으로', '종합적으로', '마지막으로', '끝으로', '마무리하며', '덧붙여', '추가로'로 시작하는 요약/정리/마무리 문장 대신, 활동의 세부 과정이나 탐구 내용을 추가 서술
@@ -500,8 +513,10 @@ ${lengthInstruction}
             ? Math.min(650, Math.max(targetChars, Math.ceil(targetBytes / 2.7)))
             : targetChars;
         const minTargetBytes = getMinimumTargetBytes(targetBytes);
+        // '입력한 활동만으로 작성' + Solar Pro 4/Mini: 짧아도 덧붙이지 않고 생성 뒤 입력 사실과 대조함
+        const strictFactMode = useStrictFacts && isFactCheckedUpstageModel(selectedModel);
 
-        // 개인별 활동 내용이 있어도 공통 활동 순서는 항상 Fisher-Yates 셔플로 랜덤화
+        // 공통 활동을 섞은 뒤에는 선택한 순서를 생성과 검증에 동일하게 적용한다.
         let selectedActivityEntries = shuffleArray(validActivityEntries);
         const forceRandomFourActivities = shouldSelectRandomFourActivities(additionalInstructions);
         if (forceRandomFourActivities) {
@@ -516,10 +531,11 @@ ${lengthInstruction}
                 ...selectedActivityEntries.map((entry, index) => ({
                     label: `활동${index + 1}`,
                     terms: getActivityEvidenceTerms(entry.text),
+                    inOrder: strictFactMode,
                 })),
                 ...[...new Set(selectedActivityEntries.map((entry) => entry.grade))].map((grade) => ({
                     label: `${grade} 성취 표현`,
-                    terms: SOLAR_GRADE_EVIDENCE[grade],
+                    terms: getGradeEvidence(grade, useStrictFacts),
                 })),
             ]
             : [];
@@ -530,11 +546,12 @@ ${lengthInstruction}
             label: `활동${index + 1}`,
             grade: entry.grade,
             anchors: getActivityEvidenceTerms(entry.text),
-            evidence: SOLAR_GRADE_EVIDENCE[entry.grade],
+            evidence: getGradeEvidence(entry.grade, useStrictFacts),
         }));
 
         try {
             updateStudent(student.id, "status", "loading");
+            updateStudent(student.id, "fallbackNotice", "");
             updateStudent(student.id, "progress", "생성 준비 중...");
             let searchContext = "";
             if (useWebSearchContext && student.individualActivity?.trim()) {
@@ -571,13 +588,14 @@ ${lengthInstruction}
                 forbiddenTerms: [subjectName, student.name],
                 requiredContentGroups: solarRequiredContentGroups,
                 activityToneRules,
+                strictFacts: useStrictFacts,
             };
             const runLocalGeneration = (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
                 attempt,
                 previousValidation,
                 provider: "local",
                 setProgress: (message) => updateStudent(student.id, "progress", message),
-                run: () => fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars: generationTargetChars }),
+                run: () => fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars: generationTargetChars, strictFacts: useStrictFacts }),
             });
             const generationResult = isLocalFallbackEligible
                 ? await generateWithLocalSolarFallback({
@@ -589,13 +607,14 @@ ${lengthInstruction}
                         previousValidation,
                         provider: "upstage",
                         setProgress: (message) => updateStudent(student.id, "progress", message),
-                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars: generationTargetChars, model: selectedModel }),
+                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars: generationTargetChars, model: selectedModel, strictFacts: useStrictFacts }),
                     }),
                 })
                 : await generateWithSilentValidation({
                     prompt,
-                    acceptLengthOnlyResult: !isUpstageSelected,
-                    preserveTextOnLengthRepair: isUpstageSelected,
+                    acceptLengthOnlyResult: !isUpstageSelected || strictFactMode,
+                    preserveTextOnLengthRepair: isUpstageSelected && !strictFactMode,
+                    preferBestCandidateOnFailure: isUpstageSelected,
                     stripExpandedGradeLabels: isUpstageSelected,
                     requiredContentGroups: solarRequiredContentGroups,
                     ...validationOptions,
@@ -608,10 +627,22 @@ ${lengthInstruction}
                     run: () => isNvidiaSelected
                         ? fetchNvidiaCompletion({ prompt: nextPrompt, additionalInstructions, targetChars: generationTargetChars, model: selectedModel })
                         : isUpstageSelected
-                            ? fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars: generationTargetChars, model: selectedModel })
+                            ? fetchUpstageCompletion({
+                                prompt: nextPrompt,
+                                additionalInstructions,
+                                targetChars: generationTargetChars,
+                                model: selectedModel,
+                                sourceFacts: strictFactMode
+                                    ? [...selectedActivityEntries.map((entry) => entry.text), student.individualActivity].filter(Boolean)
+                                    : undefined,
+                                keepTerms: strictFactMode
+                                    ? [...new Set(selectedActivityEntries.flatMap((entry) => getGradeEvidence(entry.grade, useStrictFacts)))]
+                                    : undefined,
+                                strictFacts: useStrictFacts,
+                            })
                         : appliedOpenAIKey
                             ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions, apiKey: appliedOpenAIKey, targetChars: generationTargetChars, model: selectedOpenAIModel })
-                            : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars: generationTargetChars }),
+                            : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars: generationTargetChars, strictFacts: useStrictFacts }),
                     }),
                 });
 
@@ -628,6 +659,7 @@ ${lengthInstruction}
             }
 
             const result = generationResult.text;
+            updateStudent(student.id, "fallbackNotice", getSolarFallbackNotice(generationResult));
             updateStudent(student.id, "result", result);
             updateStudent(student.id, "status", "success");
             updateStudent(student.id, "progress", "");
@@ -934,6 +966,8 @@ ${lengthInstruction}
                                 </span>
                             </label>
 
+                            <StrictFactsToggle checked={useStrictFacts} onChange={setUseStrictFacts} />
+
                             <div className="flex gap-2">
                                 <button
                                     onClick={generateAll}
@@ -1176,6 +1210,12 @@ ${lengthInstruction}
                                                 )}
                                             </button>
                                         </div>
+                                    )}
+
+                                    {student.result && student.fallbackNotice && (
+                                        <p className="fallback-notice" role="status">
+                                            {student.fallbackNotice}
+                                        </p>
                                     )}
                                 </div>
                             </div>

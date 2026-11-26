@@ -124,7 +124,7 @@ test("gwasetuk prompt includes per-activity mandatory and forbidden tone phrases
     assert.match(pageSource, /활동별 필수\/금지 표현 - 반드시 준수/);
     assert.match(pageSource, /GRADE_TONE_AVOID/);
     assert.match(pageSource, /const activityToneRules = selectedActivityEntries\.map/);
-    assert.match(pageSource, /activityToneRules,\s*\n\s*\};/);
+    assert.match(pageSource, /activityToneRules,\s*\n\s*strictFacts: useStrictFacts,\s*\n\s*\};/);
 });
 
 test("grade tone validation flags harsh deficit phrasing inside a C activity", () => {

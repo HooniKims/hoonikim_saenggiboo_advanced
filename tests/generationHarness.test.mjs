@@ -659,6 +659,45 @@ test("generateWithSilentValidation expands letter output before using the length
     assert.equal(result.acceptedWithLengthWarning, undefined);
 });
 
+test("Solar letter repair replaces the short draft without appending stock advice", async () => {
+    const shortDraft = "학교생활에 차분히 참여했습니다. 여름방학에는 학습 계획을 살펴봐 주시기 바랍니다.";
+    const revisedDraft = "한 학기 동안 학교생활에 성실하게 참여했습니다. 여름방학에는 정해 둔 시간에 짧게 복습하고, 일정한 시각에 잠들며 무리 없이 생활할 수 있도록 살펴봐 주시기 바랍니다. 친구의 이야기를 끝까지 듣는 태도를 가족과의 대화에서도 이어 갈 수 있도록 격려해 주시기 바랍니다.";
+    const prompts = [];
+    const result = await generateWithSilentValidation({
+        prompt: "여름방학 가정통신문을 작성하세요.",
+        minTargetBytes: getUtf8ByteLength(revisedDraft),
+        maxTargetBytes: 1000,
+        mode: "letter",
+        requiredTerms: ["여름방학"],
+        preserveTextOnLengthRepair: true,
+        acceptLengthOnlyResult: false,
+        generateOnce: async (prompt) => {
+            prompts.push(prompt);
+            return prompts.length === 1 ? shortDraft : revisedDraft;
+        },
+    });
+
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /기존 조언을 반복하지 말고.*전체 본문을 다시 작성/);
+    assert.equal(result.text, revisedDraft);
+    assert.equal(result.validation.ok, true);
+});
+
+test("ordered content groups flag a record that opens with the second activity", () => {
+    const options = {
+        targetChars: 150,
+        requiredContentGroups: [
+            { label: "활동1", terms: ["종이컵과 금속컵"], inOrder: true },
+            { label: "활동2", terms: ["측정값을 선그래프로"], inOrder: true },
+        ],
+    };
+    const first = "종이컵과 금속컵의 온도를 비교함.";
+    const second = "측정값을 선그래프로 정리함.";
+
+    assert.ok(validateGeneratedText(`${second} ${first}`, options).issues.some(({ code }) => code === "activity_order"));
+    assert.equal(validateGeneratedText(`${first} ${second}`, options).ok, true);
+});
+
 test("generateWithSilentValidation silently retries with a repair prompt", async () => {
     const prompts = [];
 
@@ -760,7 +799,7 @@ test("buildRepairPrompt preserves source facts without exposing framework labels
     assert.match(prompt, /새 사실.*지어내지/);
 });
 
-test("buildRepairPrompt allows grounded creative detail while blocking unverifiable specifics", () => {
+test("buildRepairPrompt only adds unused facts from the original input when strict facts are checked", () => {
     // Given
     const issues = [{ code: "under_min_bytes", message: "목표 byte 미달" }];
 
@@ -774,11 +813,32 @@ test("buildRepairPrompt allows grounded creative detail while blocking unverifia
         maxTargetBytes: 700,
         mode: "record",
         preserveTextOnLengthRepair: true,
+        strictFacts: true,
     });
 
     // Then
-    assert.match(prompt, /수행 과정.*사고.*태도.*피드백.*자연스럽게 창작/);
+    assert.match(prompt, /원래 입력에 있고 기존 본문에서 아직 다루지 않은 관찰 사실/);
+    assert.match(prompt, /수정할 글과 검색 자료는 학생의 수행을 입증하는 근거로 사용하지 않음/);
+    assert.doesNotMatch(prompt, /창작/);
     assert.match(prompt, /개인별 활동.*우선 활용.*구체화/);
+    assert.match(prompt, /작품명.*수상.*기관.*점수.*수치/);
+});
+
+test("buildRepairPrompt allows grounded creative detail by default to fill the length", () => {
+    const prompt = buildRepairPrompt({
+        text: "토론에서 근거를 비교함.",
+        issues: [{ code: "under_min_bytes", message: "목표 byte 미달" }],
+        sourcePrompt: "토론 활동을 기록하세요. 개인별 활동: 반론 근거 표를 만들어 발표함.",
+        targetChars: 300,
+        minTargetBytes: 600,
+        maxTargetBytes: 700,
+        mode: "record",
+        preserveTextOnLengthRepair: true,
+    });
+
+    assert.match(prompt, /핵심 키워드의 다른 관찰 관점과 성취 수준을 담아 뒤에 추가할 새 문장만 반환/);
+    assert.match(prompt, /수행 과정.*사고.*태도.*피드백.*자연스럽게 창작/);
+    assert.doesNotMatch(prompt, /분량 목표보다 사실에 맞는 서술을 우선/);
     assert.match(prompt, /작품명.*수상.*기관.*점수.*수치/);
 });
 
@@ -1146,4 +1206,23 @@ test("generateWithSilentValidation keeps the best invalid candidate when request
     });
 
     assert.match(result.text, /핵심 정보를 선별하여 충실히 수행함/);
+});
+
+test("record validation catches grade descriptions copied into the draft", () => {
+    for (const leaked of [
+        "물의 끓는점을 관찰하며 잘 해냄 기조를 유지하며 결과를 완성함.",
+        "참여 과정·자료 정리·협력 태도가 드러나게 하며 활동에 참여함.",
+    ]) {
+        const validation = validateGeneratedText(leaked, { targetChars: 300, mode: "record" });
+        assert.ok(validation.issues.some(({ code }) => code === "prompt_leak"), leaked);
+    }
+    const clean = validateGeneratedText("물의 끓는점을 관찰하며 온도 변화를 기록하는 과정에서 성실한 태도가 드러남.", { targetChars: 300, mode: "record" });
+    assert.equal(clean.issues.some(({ code }) => code === "prompt_leak"), false);
+});
+
+test("record finalization keeps '~다 주며' connectives instead of inserting a period", () => {
+    const helping = finalizeGeneratedText("아픈 친구를 보건실까지 직접 데려다 주며 배려심이 드러남. 필요한 자료를 가져다 놓으며 준비를 도움.", 300, 900, "record");
+    assert.match(helping, /데려다 주며/);
+    assert.match(helping, /가져다 놓으며/);
+    assert.doesNotMatch(helping, /데려다\.|가져다\./);
 });

@@ -5,14 +5,15 @@ import { Plus, Trash2, Upload, Download, Wand2, FileSpreadsheet, Users, UserX, C
 import * as XLSX from "xlsx";
 import { writeExcel } from "../../utils/excel";
 import { getCharacterGuideline, getMinimumTargetBytes, getUtf8ByteLength, normalizeTargetBytes, normalizeTargetChars } from "../../utils/textProcessor";
-import { fetchStream, AVAILABLE_MODELS, DEFAULT_MODEL, getModelOptionLabel, isLightweightModel, isNvidiaModel, isUpstageModel } from "../../utils/streamFetch";
+import { fetchStream, AVAILABLE_MODELS, DEFAULT_MODEL, getModelOptionLabel, isLightweightModel, isNvidiaModel, isFactCheckedUpstageModel, isUpstageModel } from "../../utils/streamFetch";
 import { fetchNvidiaCompletion } from "../../utils/nvidiaFetch";
 import { fetchOpenAICompletion } from "../../utils/openAIFetch";
 import { fetchUpstageCompletion } from "../../utils/upstageFetch";
 import { useOpenAIKey } from "../../utils/openAIKey";
 import OpenAIKeyControl from "../../components/OpenAIKeyControl";
+import StrictFactsToggle from "../../components/StrictFactsToggle";
 import { generateWithSilentValidation } from "../../utils/generationHarness";
-import { generateWithLocalSolarFallback } from "../../utils/localSolarFallback";
+import { generateWithLocalSolarFallback, getSolarFallbackNotice } from "../../utils/localSolarFallback";
 import { getGenerationProvider, runGenerationWithProgress } from "../../utils/generationProgress";
 import { fetchSearchContext } from "../../utils/searchContextFetch";
 import { getClubHighSchoolQualityGuidance } from "../../utils/recordQualityGuidance";
@@ -45,6 +46,7 @@ export default function ClubPage() {
     const [isGenerating, setIsGenerating] = useState(false);
     const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
     const [useWebSearchContext, setUseWebSearchContext] = useState(false);
+    const [useStrictFacts, setUseStrictFacts] = useState(false); // 입력한 활동 내용만으로 작성
     const [copiedId, setCopiedId] = useState(null);
     const fileInputRef = useRef(null);
     const activityInputRefs = useRef([]);
@@ -62,6 +64,8 @@ export default function ClubPage() {
     } = useOpenAIKey();
     const isNvidiaSelected = isNvidiaModel(selectedModel);
     const isUpstageSelected = isUpstageModel(selectedModel);
+    // '입력한 활동만으로 작성' + Solar Pro 4/Mini: 짧아도 덧붙이지 않고 생성 뒤 입력 사실과 대조함
+    const strictFactMode = useStrictFacts && isFactCheckedUpstageModel(selectedModel);
     const isLocalFallbackEligible = !isNvidiaSelected && !isUpstageSelected && !appliedOpenAIKey;
     const generationStatusText = "AI로 생성 중...";
 
@@ -279,7 +283,7 @@ export default function ClubPage() {
         }
 
         const targetBytes = normalizeTargetBytes(textLength, manualLength);
-        const lengthInstruction = getCharacterGuideline(targetChars, targetBytes, getMinimumTargetBytes(targetBytes));
+        const lengthInstruction = getCharacterGuideline(targetChars, targetBytes, getMinimumTargetBytes(targetBytes), { strictFacts: useStrictFacts });
 
         const schoolLevelMap = {
             elementary: "초등학생",
@@ -477,6 +481,7 @@ ${lengthInstruction}
 
         try {
             updateStudent(student.id, "status", "loading");
+            updateStudent(student.id, "fallbackNotice", "");
             updateStudent(student.id, "progress", "생성 준비 중...");
             let searchContext = "";
             if (useWebSearchContext && student.individualActivity?.trim()) {
@@ -512,13 +517,14 @@ ${lengthInstruction}
                 mode: "record",
                 forbiddenTerms: [clubName, student.name],
                 requiredContentGroups: solarRequiredContentGroups,
+                strictFacts: useStrictFacts,
             };
             const runLocalGeneration = (nextPrompt, { attempt, previousValidation }) => runGenerationWithProgress({
                 attempt,
                 previousValidation,
                 provider: "local",
                 setProgress: (message) => updateStudent(student.id, "progress", message),
-                run: () => fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars }),
+                run: () => fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars, strictFacts: useStrictFacts }),
             });
             const generationResult = isLocalFallbackEligible
                 ? await generateWithLocalSolarFallback({
@@ -530,13 +536,14 @@ ${lengthInstruction}
                         previousValidation,
                         provider: "upstage",
                         setProgress: (message) => updateStudent(student.id, "progress", message),
-                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars, model: selectedModel }),
+                        run: () => fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars, model: selectedModel, strictFacts: useStrictFacts }),
                     }),
                 })
                 : await generateWithSilentValidation({
                     prompt,
-                    acceptLengthOnlyResult: !isUpstageSelected,
-                    preserveTextOnLengthRepair: isUpstageSelected,
+                    acceptLengthOnlyResult: !isUpstageSelected || strictFactMode,
+                    preserveTextOnLengthRepair: isUpstageSelected && !strictFactMode,
+                    preferBestCandidateOnFailure: isUpstageSelected,
                     stripExpandedGradeLabels: isUpstageSelected,
                     ...validationOptions,
                     maxRepairAttempts: isUpstageSelected ? 4 : 2,
@@ -548,10 +555,19 @@ ${lengthInstruction}
                     run: () => isNvidiaSelected
                         ? fetchNvidiaCompletion({ prompt: nextPrompt, additionalInstructions, targetChars, model: selectedModel })
                         : isUpstageSelected
-                            ? fetchUpstageCompletion({ prompt: nextPrompt, additionalInstructions, targetChars, model: selectedModel })
+                            ? fetchUpstageCompletion({
+                                prompt: nextPrompt,
+                                additionalInstructions,
+                                targetChars,
+                                model: selectedModel,
+                                sourceFacts: strictFactMode
+                                    ? [...selectedActivityEntries.map((entry) => entry.text), student.individualActivity].filter(Boolean)
+                                    : undefined,
+                                strictFacts: useStrictFacts,
+                            })
                         : appliedOpenAIKey
                             ? fetchOpenAICompletion({ prompt: nextPrompt, additionalInstructions, apiKey: appliedOpenAIKey, targetChars, model: selectedOpenAIModel })
-                            : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars }),
+                            : fetchStream({ prompt: nextPrompt, additionalInstructions, model: selectedModel, targetChars, strictFacts: useStrictFacts }),
                     }),
                 });
 
@@ -563,6 +579,7 @@ ${lengthInstruction}
             }
 
             const result = generationResult.text;
+            updateStudent(student.id, "fallbackNotice", getSolarFallbackNotice(generationResult));
             updateStudent(student.id, "result", result);
             updateStudent(student.id, "status", "success");
             updateStudent(student.id, "progress", "");
@@ -863,6 +880,8 @@ ${lengthInstruction}
                                 </span>
                             </label>
 
+                            <StrictFactsToggle checked={useStrictFacts} onChange={setUseStrictFacts} />
+
                             <div className="flex gap-2">
                                 <button
                                     onClick={generateAll}
@@ -1078,6 +1097,12 @@ ${lengthInstruction}
                                                 )}
                                             </button>
                                         </div>
+                                    )}
+
+                                    {student.result && student.fallbackNotice && (
+                                        <p className="fallback-notice" role="status">
+                                            {student.fallbackNotice}
+                                        </p>
                                     )}
                                 </div>
                             </div>

@@ -207,16 +207,14 @@ test("fetchStream retry prompt uses polite endings for letter output", async () 
 test("local model list only exposes LM Studio-backed Gemma models", async () => {
     const localModels = AVAILABLE_MODELS.filter((model) => model.provider === "local");
     assert.deepEqual(localModels.map((model) => model.id), [
+        "lmstudio:gemma-4-12b-it",
         "gemma4:e4b",
         "gemma4:e2b",
-        "lmstudio:gemma-4-12b-it",
-        "lmstudio:google-gemma-4-12b",
     ]);
     assert.deepEqual(localModels.map(getModelOptionLabel), [
-        "Gemma 4 E4B - 빠름, 품질 보통",
-        "Gemma 4 E2B - 가장 빠름, 간단 작업용",
-        "Gemma 4 12B IT - Solar 오류 시 자동 대체 · 균형형",
-        "Gemma 4 12B - Google 원본 12B, 느리지만 품질 높음",
+        "Gemma 4 12B IT - 로컬 · 로컬 중 품질 가장 좋음, 약 1~2분",
+        "Gemma 4 E4B - 로컬 · 품질 보통, 약 20초~1분",
+        "Gemma 4 E2B - 로컬 · 로컬 중 가장 빠름, 약 15~30초",
     ]);
 
     const requests = [];
@@ -249,18 +247,16 @@ test("local model list only exposes LM Studio-backed Gemma models", async () => 
         globalThis.fetch = originalFetch;
     }
 
-    assert.equal(requests.length, 4);
+    assert.equal(requests.length, 3);
     assert.deepEqual(requests.map((request) => request.url), [
-        "https://lm.alluser.kr/v1/chat/completions",
         "https://lm.alluser.kr/v1/chat/completions",
         "https://lm.alluser.kr/v1/chat/completions",
         "https://lm.alluser.kr/v1/chat/completions",
     ]);
     assert.deepEqual(requests.map((request) => request.body.model), [
+        "unsloth/gemma-4-12b-it",
         "google/gemma-4-e4b",
         "google/gemma-4-e2b",
-        "unsloth/gemma-4-12b-it",
-        "google/gemma-4-12b",
     ]);
     assert.equal(requests.every((request) => request.headers["X-API-Key"] === undefined), true);
     assert.equal(requests.every((request) => request.body.reasoning_effort === "none"), true);
@@ -271,9 +267,8 @@ test("large LM Studio models reserve only the output tokens needed for the reque
     assert.equal(getMaxTokensForLocalModel("gemma4:e4b", 589), 3072);
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 236), 768);
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 393), 1024);
-    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 589), 768);
+    assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 589), 1536);
     assert.equal(getMaxTokensForLocalModel("lmstudio:gemma-4-12b-it", 650), 2048);
-    assert.equal(getMaxTokensForLocalModel("lmstudio:google-gemma-4-12b", 589), 768);
 });
 
 test("fetchStream retries a context overflow once with examples removed and core activities preserved", async () => {
@@ -365,26 +360,26 @@ test("fetchStream does not retry unrelated local server errors", async () => {
     assert.equal(callCount, 1);
 });
 
-test("AI model list describes Solar Pro 4 and Solar Open 2 by their strongest record use cases", () => {
+test("AI model list describes Solar Pro 4 and Solar Mini 4.5 by their strongest record use cases", () => {
     const solarModels = AVAILABLE_MODELS.filter((model) => model.provider === "upstage");
 
     assert.deepEqual(solarModels, [
         {
             id: "upstage:solar-pro4",
             name: "Upstage Solar Pro 4",
-            description: "기본 모델 · 세특·행발 최고 품질",
+            description: "기본 모델 · 가장 꼼꼼함, 약 5~20초",
             isLightweight: false,
             provider: "upstage",
         },
         {
-            id: "upstage:solar-open2",
-            name: "Upstage Solar Open 2",
-            description: "빠른 속도 · 동아리 작성 강점",
+            id: "upstage:solar-mini-4-5-preview",
+            name: "Upstage Solar Mini 4.5",
+            description: "가장 빠름, 약 3~5초",
             isLightweight: false,
             provider: "upstage",
         },
     ]);
-    assert.equal(isUpstageModel("upstage:solar-open2"), true);
+    assert.equal(isUpstageModel("upstage:solar-mini-4-5-preview"), true);
     assert.equal(isUpstageModel("lmstudio:gemma-4-12b-it"), false);
 });
 

@@ -91,7 +91,8 @@ test("gwasetuk prompt defines visibly different writing strength for A through E
     assert.match(source, /C 활동에는 성실한 참여와 시도를 먼저 인정하고/);
     assert.match(source, /D 활동은 C보다 더 뚜렷하게 반복적인 안내와 보완 필요성을 드러냄/);
     assert.match(source, /E 활동은 D보다 더 낮은 수행 수준으로/);
-    assert.match(source, /잘 해냄 기조/);
+    assert.match(source, /과제를 성실히 완수하고 핵심 개념을 이해한 수준으로 평가함/);
+    assert.doesNotMatch(source, /잘 해냄 기조/);
     assert.match(source, /연습이 더해지면 향상이 기대됨/);
     assert.match(source, /지속적인 개별 지도와 기초 학습 지원이 필요한 지점/);
     assert.match(source, /비난하거나 낙인찍는 표현은 사용하지 않음/);

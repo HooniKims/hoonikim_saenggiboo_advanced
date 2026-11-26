@@ -59,7 +59,7 @@ test("letter prompt and system message ban direct 해보세요-style advice", ()
     assert.doesNotMatch(source, /가져 보시기 바랍니다/);
 });
 
-test("all generation pages require Upstage to repair short output before length-only fallback", () => {
+test("all generation pages fill the length by default and accept short factual records only when strict facts are checked", () => {
     for (const relativePath of [
         "app/gwasetuk/page.js",
         "app/club/page.js",
@@ -70,6 +70,14 @@ test("all generation pages require Upstage to repair short output before length-
         assert.match(source, /generateWithSilentValidation\(\{[\s\S]*?acceptLengthOnlyResult:\s*!isUpstageSelected/);
         assert.match(source, /preserveTextOnLengthRepair:\s*isUpstageSelected/);
         assert.match(source, /stripExpandedGradeLabels:\s*isUpstageSelected/);
+        if (relativePath !== "app/letter/page.js") {
+            assert.match(source, /acceptLengthOnlyResult:\s*!isUpstageSelected\s*\|\|\s*strictFactMode/);
+            assert.match(source, /const strictFactMode = useStrictFacts && isFactCheckedUpstageModel\(selectedModel\);/);
+            assert.match(source, /<StrictFactsToggle checked=\{useStrictFacts\} onChange=\{setUseStrictFacts\} \/>/);
+            assert.match(source, /useState\(false\); \/\/ 입력한 활동 내용만으로 작성/);
+            assert.match(source, /sourceFacts: strictFactMode/);
+            assert.match(source, /getCharacterGuideline\(.*\{ strictFacts: useStrictFacts \}\)/);
+        }
         if (relativePath === "app/gwasetuk/page.js") {
             assert.match(source, /requiredContentGroups:\s*solarRequiredContentGroups/);
             assert.match(source, /SOLAR_GRADE_EVIDENCE/);
@@ -114,7 +122,7 @@ test("all generation pages automatically fall back from local models to Solar", 
         "app/letter/page.js",
     ]) {
         const source = readPage(relativePath);
-        assert.match(source, /import \{ generateWithLocalSolarFallback \} from "\.\.\/\.\.\/utils\/localSolarFallback"/);
+        assert.match(source, /import \{ generateWithLocalSolarFallback, getSolarFallbackNotice \} from "\.\.\/\.\.\/utils\/localSolarFallback"/);
         assert.match(source, /const isLocalFallbackEligible = !isNvidiaSelected && !isUpstageSelected && !appliedOpenAIKey;/);
         assert.match(source, /generateWithLocalSolarFallback\(\{/);
         assert.match(source, /solarGenerateOnce:[\s\S]*?fetchUpstageCompletion/);
@@ -175,7 +183,7 @@ test("gwasetuk sends every Solar repair attempt back to Upstage", () => {
     const generationFlow = source.match(/generateWithSilentValidation\(\{[\s\S]*?\n\s*\}\);/)?.[0] || "";
 
     // Then
-    assert.match(generationFlow, /isUpstageSelected[\s\S]*?fetchUpstageCompletion\(\{ prompt: nextPrompt/);
+    assert.match(generationFlow, /isUpstageSelected[\s\S]*?fetchUpstageCompletion\(\{\s*prompt: nextPrompt/);
     assert.doesNotMatch(generationFlow, /Promise\.resolve\((?:restoreMissingSolarActivities|expandSolarPreviousText)/);
 });
 

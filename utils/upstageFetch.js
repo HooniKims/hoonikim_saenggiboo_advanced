@@ -1,6 +1,6 @@
 import { isUpstageModel } from "./streamFetch.js";
 
-export async function fetchUpstageCompletion({ prompt, additionalInstructions, targetChars, model, outputType = "record" }) {
+export async function fetchUpstageCompletion({ prompt, additionalInstructions, targetChars, model, outputType = "record", sourceFacts, strictFacts, keepTerms }) {
     const selectedModel = isUpstageModel(model)
         ? String(model).replace(/^upstage:/, "")
         : "solar-pro4";
@@ -15,6 +15,9 @@ export async function fetchUpstageCompletion({ prompt, additionalInstructions, t
             targetChars,
             model: selectedModel,
             outputType,
+            sourceFacts,
+            strictFacts,
+            keepTerms,
         }),
     });
 

@@ -101,8 +101,16 @@ export function getMaxTokensForTargetChars(targetChars) {
     return Math.max(512, Math.min(2048, Math.ceil(cappedChars * 3.4)));
 }
 
-export function getExpansionFrameworkGuideline() {
-    return `개인별 활동 내용이 있으면 그 수행·역할·관찰 단서를 우선 활용하고, 입력된 활동의 동기와 핵심어 및 성취 수준의 범위에서 수행 과정, 사고 수준, 참여 태도, 피드백 반영, 관찰 가능한 결과, 성장 단서를 자연스럽게 창작·보완하되, 입력에 없는 새 활동·작품명·수상·기관·점수·수치·실험 결과 같은 검증 불가능한 새 사실은 지어내지 않음`;
+// 기본(분량 채우기): 입력 키워드와 성취 수준 범위에서 수행 과정·태도 등을 창작·보완해 분량을 채운다.
+const FILL_EXPANSION_GUIDELINE = `개인별 활동 내용이 있으면 그 수행·역할·관찰 단서를 우선 활용하고, 입력된 활동의 동기와 핵심어 및 성취 수준의 범위에서 수행 과정, 사고 수준, 참여 태도, 피드백 반영, 관찰 가능한 결과, 성장 단서를 자연스럽게 창작·보완하되, 입력에 없는 새 활동·작품명·수상·기관·점수·수치·실험 결과 같은 검증 불가능한 새 사실은 지어내지 않음`;
+// 학생 기록(과세특·동아리·행발)에서만 쓰는 키워드 풀어쓰기 지침. 가정통신문 키워드는 조언 영역이라 쓰지 않는다.
+const FILL_KEYWORD_GUIDELINE = `입력이 짧은 키워드로만 되어 있으면 각 키워드를 학생이 실제로 한 활동이나 느낀 점으로 보고 완전한 문장으로 풀어 씀. 느낀 점 키워드(재미, 뿌듯함, 어려움 등)는 학생의 흥미, 태도, 깨달음으로 서술함`;
+// 실제 활동만(체크 시): 입력에 적힌 사실만 쓰고 분량보다 사실을 우선한다.
+const STRICT_FACTS_EXPANSION_GUIDELINE = `개인별 활동 내용이 있으면 그 수행·역할·관찰 단서를 우선 활용함. 입력에 명시된 동기, 수행 과정, 사고 수준, 참여 태도, 피드백, 관찰 가능한 결과, 성장 단서만 구체화함. 입력에 없는 새 활동, 재료, 측정 방법, 예상, 실험 결과, 발표나 협력 등 학생이 했다는 새 사실은 지어내지 않음. 비교했다는 입력만 있으면 비교 과정까지만 쓰고, 어느 쪽의 값이 더 크거나 빨리 달라졌는지, 그래프의 기울기나 교차 여부, 원인까지 분석했는지는 명시된 경우에만 씀. 성취 수준은 입력된 활동의 평가 표현에만 반영함. 입력이 짧은 키워드로만 되어 있으면 각 키워드를 학생이 실제로 한 활동이나 느낀 점으로 보고, 키워드가 직접 가리키는 행동과 생각을 완전한 문장으로 풀어 씀(예: '온도계 측정' → 온도계로 온도를 측정함). 키워드끼리는 자연스럽게 이어지는 범위에서 연결하되 키워드에 없는 새 활동, 도구, 결과, 수치는 덧붙이지 않음. 느낀 점 키워드(재미, 뿌듯함, 어려움 등)는 학생의 흥미, 태도, 깨달음으로 서술하되 키워드보다 부풀리지 않음. 자료가 적으면 분량 목표보다 사실에 맞는 서술을 우선함.`;
+
+export function getExpansionFrameworkGuideline(strictFacts = false, mode = "record") {
+    if (mode === "letter") return FILL_EXPANSION_GUIDELINE;
+    return strictFacts ? STRICT_FACTS_EXPANSION_GUIDELINE : `${FILL_EXPANSION_GUIDELINE}. ${FILL_KEYWORD_GUIDELINE}`;
 }
 
 /**
@@ -110,13 +118,13 @@ export function getExpansionFrameworkGuideline() {
  * @param {number} targetChars - 목표 글자수
  * @returns {string} 프롬프트에 추가할 글자수 지침
  */
-export function getCharacterGuideline(targetChars, targetBytes = 0, minTargetBytes = 0) {
+export function getCharacterGuideline(targetChars, targetBytes = 0, minTargetBytes = 0, { strictFacts = false, mode = "record" } = {}) {
     const promptLimit = getPromptCharLimit(targetChars);
     const maxAllowed = clampTargetChars(targetChars);
     const maxAllowedBytes = Number(targetBytes) > 0 ? Math.min(Math.floor(Number(targetBytes)), MAX_BYTES) : 0;
     const minAllowedBytes = Number(minTargetBytes) > 0 ? Math.floor(Number(minTargetBytes)) : 0;
     const visibleRange = getByteTargetVisibleRange(maxAllowed, minAllowedBytes);
-    const expansionFramework = getExpansionFrameworkGuideline();
+    const expansionFramework = getExpansionFrameworkGuideline(strictFacts, mode);
 
     if (maxAllowedBytes > 0) {
         return `
@@ -128,7 +136,7 @@ Target visible length: write ${visibleRange.min}-${visibleRange.max} Korean visi
 
 작성 방법:
 1. 최종 출력은 선택한 byte 제한의 85% 이상을 목표로 충분히 구체적으로 작성
-2. 분량이 부족하지 않도록 활동의 과정, 근거, 태도, 변화, 구체적 수행 장면을 촘촘하게 서술
+2. ${strictFacts ? "입력에 있는 활동의 과정과 근거를 구체적으로 서술" : "분량이 부족하지 않도록 활동의 과정, 근거, 태도, 변화, 구체적 수행 장면을 촘촘하게 서술"}
 3. 초과가 우려되면 마지막 문장 하나를 줄이되, 문장이 중간에 끊기지 않도록 작성
 4. 모든 문장은 완전한 종결어미와 마침표로 끝냄
 5. 줄바꿈 없이 하나의 문단으로 작성

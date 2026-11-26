@@ -5,19 +5,18 @@ const LMSTUDIO_API_KEY = process.env.NEXT_PUBLIC_LMSTUDIO_API_KEY?.trim() || "";
 const LMSTUDIO_GEMMA_E4B_MODEL = "google/gemma-4-e4b";
 const LMSTUDIO_GEMMA_E2B_MODEL = "google/gemma-4-e2b";
 const LMSTUDIO_GEMMA_12B_MODEL = "unsloth/gemma-4-12b-it";
-const LMSTUDIO_GOOGLE_GEMMA_12B_MODEL = "google/gemma-4-12b";
 
 /**
  * 사용 가능한 모델 목록
  * 새 모델 추가 시 여기에만 추가하면 모든 페이지에 반영됩니다.
  */
+// 설명의 시간은 2026-11-26 실제 생성 테스트(학생 1명) 기준
 export const AVAILABLE_MODELS = [
-    { id: "gemma4:e4b", name: "Gemma 4 E4B", description: "빠름, 품질 보통", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E4B_MODEL },
-    { id: "gemma4:e2b", name: "Gemma 4 E2B", description: "가장 빠름, 간단 작업용", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E2B_MODEL },
-    { id: "lmstudio:gemma-4-12b-it", name: "Gemma 4 12B IT", description: "Solar 오류 시 자동 대체 · 균형형", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_12B_MODEL },
-    { id: "lmstudio:google-gemma-4-12b", name: "Gemma 4 12B", description: "Google 원본 12B, 느리지만 품질 높음", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GOOGLE_GEMMA_12B_MODEL },
-    { id: "upstage:solar-pro4", name: "Upstage Solar Pro 4", description: "기본 모델 · 세특·행발 최고 품질", isLightweight: false, provider: "upstage" },
-    { id: "upstage:solar-open2", name: "Upstage Solar Open 2", description: "빠른 속도 · 동아리 작성 강점", isLightweight: false, provider: "upstage" },
+    { id: "upstage:solar-pro4", name: "Upstage Solar Pro 4", description: "기본 모델 · 가장 꼼꼼함, 약 5~20초", isLightweight: false, provider: "upstage" },
+    { id: "upstage:solar-mini-4-5-preview", name: "Upstage Solar Mini 4.5", description: "가장 빠름, 약 3~5초", isLightweight: false, provider: "upstage" },
+    { id: "lmstudio:gemma-4-12b-it", name: "Gemma 4 12B IT", description: "로컬 · 로컬 중 품질 가장 좋음, 약 1~2분", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_12B_MODEL },
+    { id: "gemma4:e4b", name: "Gemma 4 E4B", description: "로컬 · 품질 보통, 약 20초~1분", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E4B_MODEL },
+    { id: "gemma4:e2b", name: "Gemma 4 E2B", description: "로컬 · 로컬 중 가장 빠름, 약 15~30초", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E2B_MODEL },
 ];
 
 export const DEFAULT_LOCAL_MODEL = "lmstudio:gemma-4-12b-it";
@@ -25,6 +24,13 @@ export const DEFAULT_MODEL = "upstage:solar-pro4";
 
 export function getModelOptionLabel(model) {
     return `${model.name} - ${model.description}`;
+}
+
+// 짧아도 문장을 덧붙이지 않고, 생성 뒤 입력 사실과 대조하는 Upstage 모델
+const FACT_CHECKED_UPSTAGE_MODEL_IDS = new Set(["upstage:solar-pro4", "upstage:solar-mini-4-5-preview"]);
+
+export function isFactCheckedUpstageModel(modelId) {
+    return FACT_CHECKED_UPSTAGE_MODEL_IDS.has(String(modelId || ""));
 }
 
 export function isNvidiaModel(modelId) {
@@ -80,7 +86,8 @@ export function getMaxTokensForLocalModel(modelId, targetChars) {
     const requestedChars = Number(targetChars) || 0;
     if (requestedChars <= 236) return 768;
     if (requestedChars <= 393) return 1024;
-    if (requestedChars <= 589) return 768;
+    // 1500byte(약 589자) 한국어 본문이 중간에 잘리지 않도록 여유를 둔다. 분량 상한은 후처리에서 문장 단위로 맞춘다.
+    if (requestedChars <= 589) return 1536;
     return 2048;
 }
 
@@ -195,7 +202,7 @@ function getLightweightSystemMessage() {
 /**
  * 일반 모델용 시스템 메시지
  */
-export function getStandardSystemMessage() {
+export function getStandardSystemMessage(strictFacts = false) {
     return `학교생활기록부 작성 전문가. 반드시 지킬 규칙:
 1. 현재형 명사 종결어미(~함, ~임, ~음, ~보임, ~드러남)만 사용. 과거형(~했음, ~였음, ~되었음, ~하였음, ~보였음) 절대 금지
 2. '학생은', '이 학생은' 등 주어 없이 활동부터 서술
@@ -203,7 +210,7 @@ export function getStandardSystemMessage() {
 4. 줄바꿈 없이 하나의 문단으로 작성
 5. 마지막 문장도 반드시 구체적 활동 서술로 끝냄
 6. 요약, 정리, 결론 문장 작성하지 않음. '마지막으로', '끝으로', '마무리하며', '덧붙여', '추가로' 사용 금지
-7. 입력된 활동 외에 사실을 지어내지 않음
+7. ${strictFacts ? "입력된 활동 외에 사실을 지어내지 않음" : "입력된 활동의 핵심어와 성취 수준 범위에서 수행 장면을 보완하되, 작품명·수상·기관·점수·수치·실험 결과 같은 검증 불가능한 새 사실은 지어내지 않음"}
 8. 입력된 모든 활동 내용을 빠짐없이 반영하여 서술
 9. 문장이 끝나면 마침표(.)를 찍고 한 칸 띄우며, 마지막 문장은 마침표(.)로 끝내고 바로 종료
 10. 오직 본문 텍스트만 출력 (글자수, 분석 등 메타정보 출력하지 않음)`;
@@ -233,14 +240,14 @@ export function getLetterSystemMessage() {
 }
 
 export async function fetchStream(bodyData) {
-    const { prompt, additionalInstructions, model, targetChars, outputType = "record" } = bodyData;
+    const { prompt, additionalInstructions, model, targetChars, outputType = "record", strictFacts = false } = bodyData;
     const localModel = model || DEFAULT_LOCAL_MODEL;
     const isLightweight = isLightweightModel(localModel);
 
     // 모델 유형에 따른 시스템 메시지 선택
     let systemMessage = outputType === "letter"
         ? getLetterSystemMessage()
-        : isLightweight ? getLightweightSystemMessage() : getStandardSystemMessage();
+        : isLightweight ? getLightweightSystemMessage() : getStandardSystemMessage(strictFacts);
 
     // 추가 지침은 시스템 메시지에도, user 프롬프트의 앞뒤에도 삽입 (Sandwich 기법)
     if (additionalInstructions) {

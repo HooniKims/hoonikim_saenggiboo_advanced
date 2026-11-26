@@ -11,7 +11,7 @@ test("fetchUpstageCompletion sends generation inputs to the server route", async
     globalThis.fetch = async (url, options) => {
         requestUrl = url;
         requestBody = JSON.parse(options.body);
-        return Response.json({ result: "자료를 분석하고 결과를 발표함.", model: "solar-open2" });
+        return Response.json({ result: "자료를 분석하고 결과를 발표함.", model: "solar-mini-4-5-preview" });
     };
 
     try {
@@ -19,7 +19,7 @@ test("fetchUpstageCompletion sends generation inputs to the server route", async
             prompt: "과세특을 작성하세요.",
             additionalInstructions: "입력 사실만 사용",
             targetChars: 393,
-            model: "upstage:solar-open2",
+            model: "upstage:solar-mini-4-5-preview",
             outputType: "record",
         });
 
@@ -33,7 +33,7 @@ test("fetchUpstageCompletion sends generation inputs to the server route", async
         prompt: "과세특을 작성하세요.",
         additionalInstructions: "입력 사실만 사용",
         targetChars: 393,
-        model: "solar-open2",
+        model: "solar-mini-4-5-preview",
         outputType: "record",
     });
 });
