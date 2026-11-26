@@ -13,7 +13,7 @@ const LMSTUDIO_GEMMA_12B_MODEL = "unsloth/gemma-4-12b-it";
 // 설명의 시간은 2026-11-26 실제 생성 테스트(학생 1명) 기준
 export const AVAILABLE_MODELS = [
     { id: "upstage:solar-pro4", name: "Upstage Solar Pro 4", description: "기본 모델 · 가장 꼼꼼함, 약 5~20초", isLightweight: false, provider: "upstage" },
-    { id: "upstage:solar-mini-4-5-preview", name: "Upstage Solar Mini 4.5", description: "가장 빠름, 약 3~5초", isLightweight: false, provider: "upstage" },
+    { id: "upstage:solar-mini-4-5-preview", name: "Upstage Solar Mini 4.5", description: "가장 빠름, 약 5~10초", isLightweight: false, provider: "upstage" },
     { id: "lmstudio:gemma-4-12b-it", name: "Gemma 4 12B IT", description: "로컬 · 로컬 중 품질 가장 좋음, 약 1~2분", isLightweight: false, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_12B_MODEL },
     { id: "gemma4:e4b", name: "Gemma 4 E4B", description: "로컬 · 품질 보통, 약 20초~1분", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E4B_MODEL },
     { id: "gemma4:e2b", name: "Gemma 4 E2B", description: "로컬 · 로컬 중 가장 빠름, 약 15~30초", isLightweight: true, provider: "local", apiUrl: LMSTUDIO_API_URL, apiKey: LMSTUDIO_API_KEY, apiModel: LMSTUDIO_GEMMA_E2B_MODEL },

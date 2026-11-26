@@ -374,7 +374,7 @@ test("AI model list describes Solar Pro 4 and Solar Mini 4.5 by their strongest 
         {
             id: "upstage:solar-mini-4-5-preview",
             name: "Upstage Solar Mini 4.5",
-            description: "가장 빠름, 약 3~5초",
+            description: "가장 빠름, 약 5~10초",
             isLightweight: false,
             provider: "upstage",
         },
